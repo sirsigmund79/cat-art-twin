@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cat Art Twin</title>
+    <meta name="description" content="Find the cat in centuries of public-domain museum art that looks most like yours." />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐈</text></svg>" />
+  </head>
+  <body>
+    <header class="masthead">
+      <h1>Cat Art Twin</h1>
+      <p>Which cat in centuries of museum art looks most like yours?</p>
+    </header>
+
+    <main>
+      <section id="pick" class="panel">
+        <label class="button primary big" for="file">Choose a photo of your cat</label>
+        <input id="file" type="file" accept="image/*" hidden />
+        <div class="model-status">
+          <progress id="model-progress" max="1"></progress>
+          <span id="model-label">Loading the matching model…</span>
+        </div>
+      </section>
+
+      <section id="crop" class="panel" hidden>
+        <p class="hint">Drag the box around your cat.</p>
+        <div class="crop-stage"><img id="crop-img" alt="Your photo" /></div>
+        <div class="actions">
+          <button id="crop-back" class="button">Choose another photo</button>
+          <button id="find" class="button primary">Find my cat's twin</button>
+        </div>
+      </section>
+
+      <section id="result" class="panel" hidden>
+        <div class="pair">
+          <figure>
+            <div class="frame"><canvas id="your-cat"></canvas></div>
+            <figcaption>Your cat</figcaption>
+          </figure>
+          <figure>
+            <div class="frame"><img id="twin-img" alt="" /></div>
+            <figcaption id="twin-rank"></figcaption>
+          </figure>
+        </div>
+        <div class="credit">
+          <h2 id="twin-title"></h2>
+          <p id="twin-byline"></p>
+          <p class="small"><span id="twin-license"></span> · <a id="twin-link" target="_blank" rel="noopener">View at <span id="twin-museum"></span></a></p>
+        </div>
+        <div class="actions">
+          <button id="prev-match" class="button">‹ Previous</button>
+          <button id="next-match" class="button">See the next match ›</button>
+        </div>
+        <div class="actions">
+          <button id="share" class="button primary">Share</button>
+          <button id="download" class="button">Download image</button>
+          <button id="again" class="button">Try another cat</button>
+        </div>
+      </section>
+
+      <p id="error" class="error" role="alert" hidden></p>
+
+      <section id="gallery-section">
+        <h2>Some of the cats waiting to meet yours</h2>
+        <div id="gallery" class="gallery"></div>
+      </section>
+    </main>
+
+    <footer>
+      <p><strong>Your photo never leaves your device.</strong> Matching runs entirely in your browser.</p>
+      <p class="small">
+        Artworks are public domain, from The Metropolitan Museum of Art, the Art Institute of Chicago and the
+        Cleveland Museum of Art open-access collections. Matching uses
+        <a href="https://huggingface.co/openai/clip-vit-base-patch32" target="_blank" rel="noopener">CLIP</a> via
+        <a href="https://github.com/huggingface/transformers.js" target="_blank" rel="noopener">Transformers.js</a>.
+      </p>
+    </footer>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,15 @@
+node_modules/
+dist/
+# Pipeline working files: only the final outputs in site/public are committed.
+data/
+eval/photos/*
+!eval/photos/.gitkeep
+eval/report.html
+eval/report/
+test-results/
+playwright-report/
+.env
+# Assistant config files are kept out of the repo.
+CLAUDE.md
+**/CLAUDE.md
+.claude/

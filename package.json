@@ -1,0 +1,53 @@
+{
+  "name": "cat-art-twin",
+  "version": "1.0.0",
+  "description": "Find your cat's twin in centuries of public-domain museum art. Matching runs in the browser.",
+  "scripts": {
+    "fetch": "tsx scripts/01-fetch.ts",
+    "download": "tsx scripts/02-download.ts",
+    "classify": "tsx scripts/03-classify.ts",
+    "detect": "tsx scripts/04-detect.ts",
+    "contact-sheet": "tsx scripts/contact-sheet.ts",
+    "review": "tsx review/server.ts",
+    "embed": "tsx scripts/05-embed.ts",
+    "colors": "tsx scripts/06-dominant-colors.ts",
+    "build:index": "tsx scripts/07-build.ts",
+    "eval": "tsx scripts/eval.ts",
+    "dev": "vite --config site/vite.config.ts",
+    "build": "vite build --config site/vite.config.ts",
+    "preview": "vite preview --config site/vite.config.ts --port 4173",
+    "typecheck": "tsc",
+    "test": "node --import tsx --test tests/unit/*.test.ts",
+    "test:e2e": "playwright test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sirsigmund79/cat-art-twin.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sirsigmund79/cat-art-twin/issues"
+  },
+  "homepage": "https://github.com/sirsigmund79/cat-art-twin#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.64.0",
+    "@types/culori": "^4.0.1",
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.4"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.3.1",
+    "cropperjs": "^1.7.0",
+    "culori": "^4.0.2",
+    "ml-kmeans": "^7.0.1",
+    "p-limit": "^7.3.3",
+    "p-throttle": "^8.1.1",
+    "sharp": "^0.35.5"
+  },
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  }
+}

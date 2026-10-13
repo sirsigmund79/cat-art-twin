@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Cat Art Twin review</title>
+    <link rel="stylesheet" href="/vendor/cropper.min.css" />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header>
+      <nav>
+        <button class="tab" data-tab="crops" aria-pressed="true">Review <span id="count-crops"></span></button>
+        <button class="tab" data-tab="rescue" aria-pressed="false">Rescue <span id="count-rescue"></span></button>
+      </nav>
+      <label><input type="checkbox" id="undecided" /> Undecided only</label>
+      <div id="progress"></div>
+      <div class="pager">
+        <button id="prev" title="Page Up">‹ Prev</button>
+        <span id="page"></span>
+        <button id="next" title="Page Down">Next ›</button>
+        <button id="reject-rest">Reject rest of page</button>
+      </div>
+      <p class="help">
+        <kbd>←↑→↓</kbd> move · <kbd>K</kbd> keep · <kbd>X</kbd> reject · <kbd>S</kbd> star · <kbd>U</kbd> undo ·
+        <kbd>R</kbd> fix crop · <kbd>PgUp</kbd>/<kbd>PgDn</kbd> page · shift-click range, ⌘/ctrl-click toggle
+      </p>
+    </header>
+    <main id="grid" tabindex="-1"></main>
+    <aside id="preview" hidden>
+      <img id="preview-img" alt="" />
+      <div id="preview-text"></div>
+    </aside>
+    <dialog id="fix">
+      <p>Drag a box around the cat. <kbd>Enter</kbd> save · <kbd>Esc</kbd> cancel</p>
+      <div class="fix-stage"><img id="fix-img" alt="" /></div>
+      <div class="fix-actions">
+        <button id="fix-cancel">Cancel</button>
+        <button id="fix-save" class="primary">Save box</button>
+      </div>
+    </dialog>
+    <script src="/vendor/cropper.min.js"></script>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
