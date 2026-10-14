@@ -24,68 +24,151 @@ interface MetObject {
   objectURL: string;
 }
 
+// The Met's firewall blocks an IP for minutes after a small burst, well below the documented 80 req/s,
+// and answers 403 to everything while blocked. Retrying right away keeps the block going. So: one
+// request at a time, a pause between requests, and a growing cooldown whenever a 403/429 shows up.
+const MET_DELAY_MS = Number(process.env.MET_DELAY_MS ?? 1500);
+const MET_API = process.env.MET_API ?? 'https://collectionapi.metmuseum.org/public/collection';
+const MET_COOLDOWN_START_MS = Number(process.env.MET_COOLDOWN_MS ?? 2 * 60_000);
+const MET_COOLDOWN_MAX_MS = 20 * 60_000;
+/** Give up (progress is cached) after this many blocks in a row without a success. */
+const MET_MAX_BLOCKS = 6;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+class MetBlockedError extends Error {}
+
+function metClient() {
+  let last = 0;
+  let cooldown = MET_COOLDOWN_START_MS;
+  let blocksInARow = 0;
+  let networkErrors = 0;
+  /** GET JSON from the Met; null for 404. Waits out blocks; throws MetBlockedError if they don't clear. */
+  return async function get<T>(url: string): Promise<T | null> {
+    for (;;) {
+      await sleep(Math.max(0, last + MET_DELAY_MS - Date.now()));
+      last = Date.now();
+      let res: Response;
+      try {
+        res = await fetch(url, {
+          headers: { 'User-Agent': 'cat-art-twin (https://github.com/sirsigmund79/cat-art-twin)' },
+          signal: AbortSignal.timeout(30_000),
+        });
+      } catch (err) {
+        if (++networkErrors >= 5) throw err;
+        console.warn(`  met: network error (${(err as Error).message}); retrying in 10s`);
+        await sleep(10_000);
+        continue;
+      }
+      if (res.status === 403 || res.status === 429) {
+        await res.body?.cancel();
+        if (++blocksInARow >= MET_MAX_BLOCKS) {
+          throw new MetBlockedError(`still blocked after ${MET_MAX_BLOCKS} cooldowns`);
+        }
+        console.warn(`  met: blocked (HTTP ${res.status}); waiting ${cooldown >= 60_000 ? `${cooldown / 60_000} min` : `${Math.round(cooldown / 1000)}s`} before trying again`);
+        await sleep(cooldown);
+        cooldown = Math.min(cooldown * 2, MET_COOLDOWN_MAX_MS);
+        continue;
+      }
+      blocksInARow = 0;
+      networkErrors = 0;
+      cooldown = MET_COOLDOWN_START_MS;
+      if (res.status === 404) {
+        await res.body?.cancel();
+        return null;
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+      return (await res.json()) as T;
+    }
+  };
+}
+
 async function fetchMet(): Promise<ArtworkRecord[]> {
-  const base = 'https://collectionapi.metmuseum.org/public/collection/v1';
-  // The Met asks for at most 80 req/s; stay near 10.
-  const throttle = pThrottle({ limit: 10, interval: 1000 });
-  const get = throttle(<T>(url: string) => fetchJson<T>(url));
+  const get = metClient();
+  const cacheDir = path.join(CACHE, 'met');
+  fs.mkdirSync(cacheDir, { recursive: true });
 
   // v1/search was retired on 2026-10-01 (HTTP 410). v1.1 pages results: limit <= 500, and nothing
   // past offset + limit = 10,000 is served. Object lookups stay on v1.
+  // The ID list is cached so a rerun after a block goes straight to the objects. Delete
+  // data/cache/met/_search.json to search again.
   const PAGE = 500;
   const WINDOW = 10_000;
-  const ids = new Set<number>();
+  const searchCache = path.join(cacheDir, '_search.json');
+  const searched = readJson<Record<string, number[]>>(searchCache, {});
   for (const term of TERMS) {
+    if (searched[term]) continue;
+    const termIds: number[] = [];
     let total = 0;
-    let got = 0;
     for (let offset = 0; offset < WINDOW; offset += PAGE) {
       const res = await get<{ total: number; objectIDs: number[] | null }>(
-        `https://collectionapi.metmuseum.org/public/collection/v1.1/search?hasImages=true&q=${encodeURIComponent(term)}&offset=${offset}&limit=${PAGE}`,
+        `${MET_API}/v1.1/search?hasImages=true&q=${encodeURIComponent(term)}&offset=${offset}&limit=${PAGE}`,
       );
-      total = res.total ?? 0;
-      for (const id of res.objectIDs ?? []) ids.add(id);
-      got += res.objectIDs?.length ?? 0;
-      if (!res.objectIDs?.length || offset + PAGE >= total) break;
+      total = res?.total ?? 0;
+      termIds.push(...(res?.objectIDs ?? []));
+      if (!res?.objectIDs?.length || offset + PAGE >= total) break;
     }
+    searched[term] = termIds;
+    writeJson(searchCache, searched);
     const capped = total > WINDOW ? ` (API serves only the first ${WINDOW} of ${total})` : '';
-    console.log(`  met: "${term}" -> ${got} ids${capped}`);
+    console.log(`  met: "${term}" -> ${termIds.length} ids${capped}`);
+  }
+  const ids = [...new Set(Object.values(searched).flat())];
+
+  const cached = (id: number) => fs.existsSync(path.join(cacheDir, `${id}.json`));
+  const todo = ids.filter((id) => !cached(id));
+  const minutes = Math.ceil((todo.length * MET_DELAY_MS) / 60_000);
+  console.log(`  met: ${ids.length} objects, ${ids.length - todo.length} cached, ${todo.length} to fetch (~${minutes} min)`);
+
+  let gone = 0;
+  let blocked = false;
+  for (let i = 0; i < todo.length; i++) {
+    const id = todo[i];
+    try {
+      // A 404 (object removed since the search index was built) is cached as null so it isn't refetched.
+      writeJson(path.join(cacheDir, `${id}.json`), await get<MetObject>(`${MET_API}/v1/objects/${id}`));
+    } catch (err) {
+      if (err instanceof MetBlockedError) {
+        console.error(`  met: ${err.message}. Progress is saved; wait 30 minutes or so and run: npm run fetch -- met`);
+        blocked = true;
+        break;
+      }
+      console.warn(`  met: object ${id} failed: ${(err as Error).message}`);
+    }
+    if ((i + 1) % 100 === 0) console.log(`  met: ${i + 1}/${todo.length} fetched`);
   }
 
-  const cacheDir = path.join(CACHE, 'met');
-  fs.mkdirSync(cacheDir, { recursive: true });
   const records: ArtworkRecord[] = [];
-  let done = 0;
-  let failed = 0;
-  await Promise.all(
-    [...ids].map(async (id) => {
-      const cacheFile = path.join(cacheDir, `${id}.json`);
-      let obj = readJson<MetObject | null>(cacheFile, null);
-      if (!obj) {
-        try {
-          obj = await get<MetObject>(`${base}/objects/${id}`);
-          writeJson(cacheFile, obj);
-        } catch (err) {
-          failed++;
-          console.warn(`  met: object ${id} failed: ${(err as Error).message}`);
-          return;
-        }
-      }
-      if (++done % 500 === 0) console.log(`  met: ${done}/${ids.size} objects`);
-      if (!obj.isPublicDomain || !obj.primaryImage) return;
-      records.push({
-        id: String(obj.objectID),
-        source: 'met',
-        title: clean(obj.title),
-        artist: clean(obj.artistDisplayName),
-        date: clean(obj.objectDate),
-        // primaryImageSmall is the "web-large" rendition, close to the 800px we keep.
-        imageUrl: obj.primaryImageSmall || obj.primaryImage,
-        objectUrl: obj.objectURL || `https://www.metmuseum.org/art/collection/search/${obj.objectID}`,
-        license: 'Public domain (CC0), The Met Open Access',
-      });
-    }),
-  );
-  if (failed) console.warn(`  met: ${failed} objects failed; rerun to retry them`);
+  let missing = 0;
+  for (const id of ids) {
+    if (!cached(id)) {
+      missing++;
+      continue;
+    }
+    const obj = readJson<MetObject | null>(path.join(cacheDir, `${id}.json`), null);
+    if (!obj) {
+      gone++;
+      continue;
+    }
+    if (!obj.isPublicDomain || !obj.primaryImage) continue;
+    records.push({
+      id: String(obj.objectID),
+      source: 'met',
+      title: clean(obj.title),
+      artist: clean(obj.artistDisplayName),
+      date: clean(obj.objectDate),
+      // primaryImageSmall is the "web-large" rendition, close to the 800px we keep.
+      imageUrl: obj.primaryImageSmall || obj.primaryImage,
+      objectUrl: obj.objectURL || `https://www.metmuseum.org/art/collection/search/${obj.objectID}`,
+      license: 'Public domain (CC0), The Met Open Access',
+    });
+  }
+  if (gone) console.log(`  met: ${gone} objects no longer exist (404)`);
+  if (missing) {
+    // Write what we have so later steps can start, but report the fetch as incomplete.
+    console.warn(`  met: ${missing} objects not fetched yet; rerun to finish`);
+    if (blocked) process.exitCode = 1;
+  }
   return records;
 }
 
