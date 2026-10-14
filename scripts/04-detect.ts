@@ -5,7 +5,7 @@ import path from 'node:path';
 import { cutCrop, loadCatDetector, padBox, toRawImage, type Detection } from './lib/models.ts';
 import { forEachWithCheckpoint, readJson, writeJson } from './lib/io.ts';
 import { CROPS, CROP_RECORDS, DETECTIONS, SCORES, imagePath } from './lib/paths.ts';
-import { CLASSIFY_MIN, CROP_PAD, CROP_SIZE, DETECT_MIN, FALLBACK_MIN } from './lib/thresholds.ts';
+import { CLASSIFY_MIN, CROP_PAD, CROP_SIZE, DETECT_BEST_MIN, DETECT_MIN, FALLBACK_MIN } from './lib/thresholds.ts';
 import type { CropRecord, ScoreRecord } from './lib/types.ts';
 
 async function main() {
@@ -22,8 +22,8 @@ async function main() {
     await forEachWithCheckpoint(
       todo,
       async (key) => {
-        // Low floor here so near-threshold boxes are kept for the contact sheet; DETECT_MIN is applied below.
-        detections[key] = await detect(await toRawImage(imagePath(key)), Math.min(DETECT_MIN, 0.05));
+        // Keep boxes down to DETECT_BEST_MIN; the thresholds are applied below, so they can change without re-detecting.
+        detections[key] = await detect(await toRawImage(imagePath(key)), Math.min(DETECT_MIN, DETECT_BEST_MIN));
       },
       () => writeJson(DETECTIONS, detections),
       25,
@@ -34,9 +34,18 @@ async function main() {
   fs.mkdirSync(CROPS, { recursive: true });
   const crops: CropRecord[] = [];
   let fallbacks = 0;
+  let bestOnly = 0;
   for (const key of candidates) {
     const catScore = scores[key].catScore;
-    const boxes = (detections[key] ?? []).filter((d) => d.score >= DETECT_MIN);
+    const all = detections[key] ?? [];
+    let boxes = all.filter((d) => d.score >= DETECT_MIN);
+    if (!boxes.length) {
+      const best = all.reduce<Detection | null>((b, d) => (d.score >= DETECT_BEST_MIN && d.score > (b?.score ?? 0) ? d : b), null);
+      if (best) {
+        boxes = [best];
+        bestOnly++;
+      }
+    }
     if (boxes.length) {
       boxes.forEach((d, n) =>
         crops.push({ cropId: `${key}-${n}`, artworkId: key, box: d.box, detScore: d.score, catScore, fallback: false }),
@@ -56,6 +65,7 @@ async function main() {
   const artworksWithCrops = new Set(crops.map((c) => c.artworkId)).size;
   console.log(
     `${crops.length} crops from ${artworksWithCrops} images (DETECT_MIN ${DETECT_MIN}); ` +
+      `${bestOnly} images kept only their best box (>= ${DETECT_BEST_MIN}); ` +
       `${fallbacks} whole-image fallbacks (catScore >= ${FALLBACK_MIN}, no box).`,
   );
 }

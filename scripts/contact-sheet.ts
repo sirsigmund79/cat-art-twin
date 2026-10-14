@@ -33,7 +33,7 @@ function main() {
     .sort((a, b) => b[1].catScore - a[1].catScore)
     .slice(0, N / 2)
     .map(([key, s]) => ({ img: `images/${key}.jpg`, label: `catScore ${s.catScore.toFixed(3)}`, key }));
-  // Images that passed the classifier but whose best box fell just under DETECT_MIN (and had no fallback).
+  // Images that passed the classifier but produced no crop despite having a (weak) box.
   const cropped = new Set(crops.map((c) => c.artworkId));
   const detectorRejects = Object.entries(detections)
     .filter(([key, d]) => !cropped.has(key) && d.length)
