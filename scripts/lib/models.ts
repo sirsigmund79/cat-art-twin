@@ -11,9 +11,13 @@ import {
 import sharp, { type Sharp } from 'sharp';
 import { CLIP_DTYPE, CLIP_MODEL } from '../../shared/config.ts';
 import { normalize } from '../../shared/score.ts';
+import { robustFetch } from './robust-fetch.ts';
 import type { Box } from './types.ts';
 
 export const DETECTOR_MODEL = 'Xenova/owlvit-base-patch32';
+
+// Retry every model-file request and resume large files after dropped connections.
+env.fetch = robustFetch(env.fetch as typeof fetch);
 
 // Optional Hugging Face mirror, e.g. HF_ENDPOINT=https://hf-mirror.com, for networks that can't reach huggingface.co.
 if (process.env.HF_ENDPOINT) env.remoteHost = process.env.HF_ENDPOINT.replace(/\/?$/, '/');
