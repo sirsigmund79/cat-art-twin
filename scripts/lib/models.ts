@@ -4,6 +4,7 @@ import {
   CLIPTextModelWithProjection,
   CLIPVisionModelWithProjection,
   RawImage,
+  env,
   pipeline,
   type Tensor,
 } from '@huggingface/transformers';
@@ -13,6 +14,32 @@ import { normalize } from '../../shared/score.ts';
 import type { Box } from './types.ts';
 
 export const DETECTOR_MODEL = 'Xenova/owlvit-base-patch32';
+
+// Optional Hugging Face mirror, e.g. HF_ENDPOINT=https://hf-mirror.com, for networks that can't reach huggingface.co.
+if (process.env.HF_ENDPOINT) env.remoteHost = process.env.HF_ENDPOINT.replace(/\/?$/, '/');
+
+/**
+ * Model files download on first use (then load from the local cache). Retry so a dropped
+ * connection mid-download doesn't end the run; finished files aren't downloaded again.
+ */
+async function withRetry<T>(what: string, load: () => Promise<T>, tries = 5): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await load();
+    } catch (err) {
+      if (attempt >= tries) {
+        throw new Error(
+          `Could not download ${what} from ${env.remoteHost} after ${tries} tries (${(err as Error).message}). ` +
+            'Check that https://huggingface.co opens in your browser; a VPN, proxy or firewall may be blocking it.',
+          { cause: err },
+        );
+      }
+      const wait = 5 * 2 ** (attempt - 1);
+      console.warn(`  ${what}: download failed (${(err as Error).message}); retrying in ${wait}s`);
+      await new Promise((r) => setTimeout(r, wait * 1000));
+    }
+  }
+}
 
 /** Decode any image sharp can read into a Transformers.js RawImage (RGB). */
 export async function toRawImage(input: string | Buffer | Sharp): Promise<RawImage> {
@@ -28,8 +55,10 @@ function rows(t: Tensor): Float32Array[] {
 }
 
 export async function loadClipVision() {
-  const processor = await AutoProcessor.from_pretrained(CLIP_MODEL);
-  const model = await CLIPVisionModelWithProjection.from_pretrained(CLIP_MODEL, { dtype: CLIP_DTYPE });
+  const processor = await withRetry('CLIP processor', () => AutoProcessor.from_pretrained(CLIP_MODEL));
+  const model = await withRetry('CLIP vision model', () =>
+    CLIPVisionModelWithProjection.from_pretrained(CLIP_MODEL, { dtype: CLIP_DTYPE }),
+  );
   /** Normalized image embeddings, one per input. */
   return async (images: RawImage[]): Promise<Float32Array[]> => {
     const inputs = await processor(images);
@@ -39,8 +68,10 @@ export async function loadClipVision() {
 }
 
 export async function loadClipText() {
-  const tokenizer = await AutoTokenizer.from_pretrained(CLIP_MODEL);
-  const model = await CLIPTextModelWithProjection.from_pretrained(CLIP_MODEL, { dtype: CLIP_DTYPE });
+  const tokenizer = await withRetry('CLIP tokenizer', () => AutoTokenizer.from_pretrained(CLIP_MODEL));
+  const model = await withRetry('CLIP text model', () =>
+    CLIPTextModelWithProjection.from_pretrained(CLIP_MODEL, { dtype: CLIP_DTYPE }),
+  );
   /** Normalized text embeddings, one per prompt. */
   return async (texts: string[]): Promise<Float32Array[]> => {
     const inputs = tokenizer(texts, { padding: true, truncation: true });
@@ -55,7 +86,7 @@ export interface Detection {
 }
 
 export async function loadCatDetector() {
-  const detector = await pipeline('zero-shot-object-detection', DETECTOR_MODEL);
+  const detector = await withRetry('OWL-ViT detector', () => pipeline('zero-shot-object-detection', DETECTOR_MODEL));
   /** Cat boxes above `threshold`, in normalized coordinates, after non-max suppression. */
   return async (image: RawImage, threshold: number): Promise<Detection[]> => {
     const out = await detector(image, ['a cat'], { threshold, percentage: false });

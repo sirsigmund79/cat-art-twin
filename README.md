@@ -52,7 +52,8 @@ curl -sI "https://openaccess-api.clevelandart.org/api/artworks/?q=cat&limit=1" |
 curl -sI "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/config.json" | head -1
 ```
 
-Behind an HTTPS proxy, set `NODE_USE_ENV_PROXY=1` so Node's `fetch` uses `HTTPS_PROXY`.
+Behind an HTTPS proxy, set `NODE_USE_ENV_PROXY=1` so Node's `fetch` uses `HTTPS_PROXY`. If huggingface.co itself is
+unreachable, set `HF_ENDPOINT` to a Hugging Face mirror.
 
 ## Pipeline
 
