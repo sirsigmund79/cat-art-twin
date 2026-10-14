@@ -30,8 +30,13 @@ export interface Box {
 }
 
 export interface ScoreRecord {
-  /** Combined probability of the cat prompts (artwork or photo of a cat). */
+  /**
+   * Combined probability of the positive prompts: an artwork or photo of an animal. (Named from
+   * when only cats were collected; kept so existing data files still read.)
+   */
   catScore: number;
+  /** CLIP's probability that the image looks old (painting, print, vintage photo) rather than modern. */
+  old?: number;
   /** Which cat prompt won. Missing on scores from before photos were added. */
   kind?: Kind;
   /** Prompt-set version; scores from another version are recomputed. */

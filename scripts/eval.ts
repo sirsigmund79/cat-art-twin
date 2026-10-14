@@ -1,45 +1,57 @@
 // Phase 6: run the browser's scoring over eval/photos/ under each setting and write eval/report.html.
 // Photos (JPEG, PNG, WebP, HEIC...) are auto-cropped to the best OWL-ViT cat box, standing in for
 // the visitor's drag box. The summary table measures variety: if the same few images win for every
-// photo, "distinct in top 3" is low and "most common #1" is high.
+// photo, "distinct in top 3" is low and "most common #1" is high; "creatures" shows how often the
+// match is something other than a cat.
 import fs from 'node:fs';
 import path from 'node:path';
 import { DEFAULT_SCORING } from '../shared/config.ts';
-import { Int8Index, makeCentering, rank, type CenterMode, type Match } from '../shared/score.ts';
+import { Int8Index, PreparedIndex, makeTransform, rank, type CenterMode, type Match } from '../shared/score.ts';
 import type { SiteMeta } from '../shared/types.ts';
 import { readUprightImage } from './lib/heic.ts';
-import { cutCrop, loadCatDetector, loadClipVision, padBox, toRawImage } from './lib/models.ts';
+import { cutCrop, loadAnimalDetector, loadClipVision, padBox, toRawImage } from './lib/models.ts';
 import { paletteOfFile } from './lib/palette.ts';
 import { EVAL_PHOTOS, ROOT, SITE_PUBLIC } from './lib/paths.ts';
 import { CROP_PAD } from './lib/thresholds.ts';
 
 interface Setting {
-  adjust: boolean;
   center: CenterMode;
+  removeSpecies: boolean;
   w: number;
 }
-const SETTINGS: Setting[] = (['off', 'global', 'kind'] as const).flatMap((center) =>
-  [false, true].flatMap((adjust) => [1, 0.85].map((w) => ({ center, adjust, w }))),
-);
+const SETTINGS: Setting[] = [
+  { center: 'off', removeSpecies: false, w: 1 },
+  { center: 'kind', removeSpecies: false, w: 1 },
+  { center: 'kind', removeSpecies: false, w: 0.75 },
+  { center: 'kind', removeSpecies: true, w: 1 },
+  { center: 'kind', removeSpecies: true, w: 0.75 },
+  { center: 'kind', removeSpecies: true, w: 0.6 },
+  { center: 'global', removeSpecies: true, w: 0.75 },
+];
 const TOP = 3;
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
-const label = (s: Setting) => `center ${s.center}<br>adjust ${s.adjust ? 'on' : 'off'}<br>w ${s.w}`;
+const label = (s: Setting) => `center ${s.center}<br>species ${s.removeSpecies ? 'removed' : 'kept'}<br>w ${s.w}`;
 const isDefault = (s: Setting) =>
-  s.adjust === DEFAULT_SCORING.adjust && s.center === DEFAULT_SCORING.center && s.w === DEFAULT_SCORING.w;
+  s.center === DEFAULT_SCORING.center && s.removeSpecies === DEFAULT_SCORING.removeSpecies && s.w === DEFAULT_SCORING.w;
+const settingKey = (s: Setting) => `${s.center}/${s.removeSpecies}`;
 
 async function main() {
   const meta = JSON.parse(fs.readFileSync(path.join(SITE_PUBLIC, 'meta.json'), 'utf8')) as SiteMeta;
-  const index = new Int8Index(new Int8Array(fs.readFileSync(path.join(SITE_PUBLIC, 'index.bin'))), meta.dim);
-  if (!meta.means) console.warn('meta.json has no means; rerun npm run build:index to test centering.');
+  const raw = new Int8Index(new Int8Array(fs.readFileSync(path.join(SITE_PUBLIC, 'index.bin'))), meta.dim);
+  if (!meta.means || !meta.speciesBasis) console.warn('meta.json is from an older build; rerun npm run build:index.');
   const palettes = meta.items.map((i) => i.colors);
-  const centerings = { off: undefined, global: makeCentering(meta, 'global'), kind: makeCentering(meta, 'kind') };
+  // One prepared index per transform combination (w doesn't change the index).
+  const prepared = new Map<string, PreparedIndex>();
+  for (const s of SETTINGS) {
+    if (!prepared.has(settingKey(s))) prepared.set(settingKey(s), new PreparedIndex(raw, makeTransform(meta, s)));
+  }
   const photos = fs.readdirSync(EVAL_PHOTOS).filter((f) => /\.(jpe?g|png|webp|avif|tiff?|heic|heif)$/i.test(f));
   if (!photos.length) throw new Error(`Put some cat photos in ${EVAL_PHOTOS} first.`);
 
   const outDir = path.join(ROOT, 'eval', 'report');
   fs.mkdirSync(outDir, { recursive: true });
-  const detect = await loadCatDetector();
+  const detect = await loadAnimalDetector(['a cat']);
   const embed = await loadClipVision();
 
   const results: Match[][][] = []; // [photo][setting] -> top matches
@@ -60,10 +72,9 @@ async function main() {
     const photoPalette = await paletteOfFile(crop);
 
     const perSetting = SETTINGS.map((s) =>
-      rank(vec, index, {
-        adjust: s.adjust,
+      rank(vec, prepared.get(settingKey(s))!, {
+        adjust: false,
         w: s.w,
-        center: centerings[s.center],
         topK: TOP,
         textPhoto: meta.textPhoto,
         textPainting: meta.textPainting,
@@ -76,7 +87,7 @@ async function main() {
       const imgs = top
         .map((m) => {
           const item = meta.items[m.index];
-          const tip = `${item.title} — ${item.artist} ${item.date} (${item.kind})\nscore ${m.score.toFixed(3)} clip ${m.clip.toFixed(3)} color ${m.color.toFixed(3)}`;
+          const tip = `${item.creature ?? '?'}: ${item.title} — ${item.artist} ${item.date} (${item.kind})\nscore ${m.score.toFixed(3)} clip ${m.clip.toFixed(3)} color ${m.color.toFixed(3)}`;
           return `<img src="../site/public/${item.crop}" title="${esc(tip)}">`;
         })
         .join('');
@@ -95,8 +106,11 @@ async function main() {
     const firsts = new Map<number, number>();
     for (const r of results) firsts.set(r[si][0].index, (firsts.get(r[si][0].index) ?? 0) + 1);
     const hub = Math.max(...firsts.values());
-    const photosShare = results.flatMap((r) => r[si]).filter((m) => meta.items[m.index].kind === 'photo').length / (n * TOP);
-    return { s, distinct, hub, photosShare };
+    const top = results.flatMap((r) => r[si]);
+    const photosShare = top.filter((m) => meta.items[m.index].kind === 'photo').length / (n * TOP);
+    const creatures = new Set(top.map((m) => meta.items[m.index].creature ?? '?')).size;
+    const nonCat = results.filter((r) => meta.items[r[si][0].index].creature !== 'cat').length;
+    return { s, distinct, hub, photosShare, creatures, nonCat };
   });
   const head = SETTINGS.map((s) => `<th${isDefault(s) ? ' class="default"' : ''}>${label(s)}</th>`).join('');
   const sumRow = (name: string, f: (x: (typeof summary)[number]) => string) =>
@@ -107,11 +121,13 @@ async function main() {
 th img{width:130px}td img{width:64px;height:64px;object-fit:cover;margin:1px}.default{background:#ffe9a8}.sum td{font-size:15px}</style>
 <h1>Eval: ${n} photos, top ${TOP} per setting</h1>
 <p>Highlighted column is the current default. <b>center</b>: subtract average fingerprints (off, one overall average,
-or separate photo/art averages). <b>adjust</b>: shift photos toward "painting". <b>w</b>: share of CLIP vs color.
-Hover a match for its scores.</p>
+or separate photo/art averages). <b>species</b>: whether the directions that tell animal species apart are removed,
+so matching runs on looks. <b>w</b>: share of CLIP vs color. Hover a match for its creature and scores.</p>
 <table class="sum"><tr><th></th>${head}</tr>
 ${sumRow(`Distinct images in top ${TOP} (max ${n * TOP}; higher = more variety)`, (x) => String(x.distinct))}
 ${sumRow('Photos sharing the most common #1 (lower is better)', (x) => `${x.hub} / ${n}`)}
+${sumRow(`Different creatures in top ${TOP}`, (x) => String(x.creatures))}
+${sumRow('Photos whose #1 is not a cat', (x) => `${x.nonCat} / ${n}`)}
 ${sumRow(`Share of photos (vs art) in top ${TOP}`, (x) => `${Math.round(x.photosShare * 100)}%`)}
 </table>
 <table><tr><th>Photo</th>${head}</tr>${rows.join('\n')}</table>`;
@@ -119,8 +135,9 @@ ${sumRow(`Share of photos (vs art) in top ${TOP}`, (x) => `${Math.round(x.photos
   console.log(`Wrote eval/report.html (${n} photos x ${SETTINGS.length} settings)`);
   for (const x of summary) {
     console.log(
-      `  center ${x.s.center.padEnd(6)} adjust ${x.s.adjust ? 'on ' : 'off'} w ${String(x.s.w).padEnd(4)}: ` +
-        `${String(x.distinct).padStart(3)} distinct, top-1 hub ${x.hub}/${n}, ${Math.round(x.photosShare * 100)}% photos`,
+      `  center ${x.s.center.padEnd(6)} species ${x.s.removeSpecies ? 'removed' : 'kept   '} w ${String(x.s.w).padEnd(4)}: ` +
+        `${String(x.distinct).padStart(3)} distinct, top-1 hub ${x.hub}/${n}, ${x.creatures} creatures, ` +
+        `#1 not a cat ${x.nonCat}/${n}, ${Math.round(x.photosShare * 100)}% photos`,
     );
   }
 }

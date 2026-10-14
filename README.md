@@ -1,11 +1,12 @@
-# Cat Art Twin
+# What creature is your cat?
 
-Upload a photo of your cat and find the cat in centuries of art and photography that looks most like it,
-with a side-by-side image to share. Matching runs entirely in the visitor's browser: the photo never leaves
+Upload a photo of your cat and find the creature in centuries of paintings, prints and old photographs that
+looks most like it: a Dutch still-life owl, a fox from a Japanese print, a medieval lion, or a painted cat.
+A side-by-side image is ready to share. Matching runs entirely in the visitor's browser: the photo never leaves
 the device, and the whole thing is a static site.
 
-The heavy lifting happens once, offline: collect openly licensed images from museum and image APIs, filter and
-crop the cats, review the uncertain ones by hand, embed them with CLIP and ship a small index. The site runs the same CLIP model in the browser with
+The heavy lifting happens once, offline: collect openly licensed historical images from museum and image APIs,
+filter and crop the animals, review the uncertain ones by hand, embed them with CLIP and ship a small index. The site runs the same CLIP model in the browser with
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 Built on open source:
@@ -58,16 +59,23 @@ unreachable, set `HF_ENDPOINT` to a Hugging Face mirror.
 
 ## Sources and licenses
 
+Only historical works go on the site: dated before 1960 (`HISTORICAL_BEFORE` in `shared/config.ts`), or undated
+but from a museum or old-book source, or undated and judged old-looking by CLIP (`scripts/lib/historical.ts`).
+Modern items are skipped by detection, hidden from review and left out of the index.
+
 | Source | What | Key |
 | --- | --- | --- |
-| The Met, Art Institute of Chicago, Cleveland Museum of Art | Public-domain museum art | None |
-| [Wikimedia Commons](https://commons.wikimedia.org) | Files tagged as depicting a house cat, and the "Cats in art" category tree: art and photos | None |
-| [Flickr](https://www.flickr.com) | Creative Commons and public-domain cat photos | `FLICKR_API_KEY`, free at <https://www.flickr.com/services/apps/create/> |
-| [Europeana](https://www.europeana.eu) | Images from thousands of European museums and archives, including recent CC-licensed work | `EUROPEANA_API_KEY`, free at <https://pro.europeana.eu/page/get-api> |
+| The Met, Art Institute of Chicago, Cleveland Museum of Art | Public-domain museum art of cats and other animals. The Met is slow (one request per object), so its animal terms only run with `MET_ANIMALS=1` | None |
+| [Wikidata](https://www.wikidata.org) | Paintings, drawings and prints tagged with the animal they depict; images and licenses from Wikimedia Commons | None |
+| [Wikimedia Commons](https://commons.wikimedia.org) | The "Animals in art" and "Cats in art" category trees, and files depicting a house cat | None |
+| [Biodiversity Heritage Library](https://www.flickr.com/photos/biodivlibrary/) | Public-domain natural-history illustrations, via Flickr | `FLICKR_API_KEY`, free at <https://www.flickr.com/services/apps/create/> |
+| [Europeana](https://www.europeana.eu) | Images of animals from thousands of European museums and archives, dated before 1960 | `EUROPEANA_API_KEY`, free at <https://pro.europeana.eu/page/get-api> |
+| [Flickr](https://www.flickr.com) search | Creative Commons cat photos, mostly modern; only with `npm run fetch -- flickr` | `FLICKR_API_KEY` |
 
-`npm run fetch` uses every source whose key is set. Set keys for one session in Command Prompt with
-`set FLICKR_API_KEY=...` (PowerShell: `$env:FLICKR_API_KEY="..."`, macOS/Linux: `export FLICKR_API_KEY=...`).
-Caps keep the first run manageable: `COMMONS_MAX` (default 8000), `FLICKR_MAX` (5000), `EUROPEANA_MAX` (3000).
+`npm run fetch` uses every source above except Flickr search, skipping ones whose key isn't set. Set keys for one
+session in Command Prompt with `set FLICKR_API_KEY=...` (PowerShell: `$env:FLICKR_API_KEY="..."`,
+macOS/Linux: `export FLICKR_API_KEY=...`). Caps keep runs manageable: `WIKIDATA_MAX` (default 15000),
+`COMMONS_MAX` (8000), `BHL_MAX` (6000), `EUROPEANA_MAX` (3000), `FLICKR_MAX` (5000).
 
 Accepted licenses: public domain, CC0, CC BY, CC BY-SA, CC BY-NC and CC BY-NC-SA (`scripts/lib/licenses.ts`).
 NoDerivatives licenses are refused, since the site shows crops. Every match on the site credits its creator,
@@ -82,8 +90,8 @@ Every step can be stopped and re-run; it picks up where it left off.
 | --- | --- | --- |
 | 1. Scrape | `npm run fetch` (or `npm run fetch -- met aic`) | `data/raw/<source>.jsonl` |
 | | `npm run download` | `data/images/<source>-<id>.jpg` (800px), `data/download-failures.jsonl` |
-| 2. Filter and crop | `npm run classify` | `data/scores.json` (CLIP "artwork of a cat" vs decoys) |
-| | `npm run detect` | `data/crops/*.jpg`, `data/crops.json` |
+| 2. Filter and crop | `npm run classify` | `data/scores.json` (CLIP "artwork or photo of an animal" vs decoys, photo/art, old/modern look) |
+| | `npm run detect` | `data/crops/*.jpg`, `data/crops.json` (OWL-ViT animal boxes, historical images only) |
 | | `npm run contact-sheet` | `data/contact-sheet.html`: 100 random crops + near-threshold rejects |
 | 3. Hand review | `npm run review` | `data/review.json` |
 | 4. Embed and index | `npm run embed` | `data/final/*.jpg`, `data/embeddings.json` (int8) |
@@ -92,7 +100,9 @@ Every step can be stopped and re-run; it picks up where it left off.
 | 6. Tune | `npm run eval` (after `npm run build:index`) | `eval/report.html` |
 
 Thresholds for Phase 2 live in `scripts/lib/thresholds.ts`. `npm run detect` rebuilds the crop list from saved
-detections on every run, so changing `DETECT_MIN` or `FALLBACK_MIN` doesn't re-run the detector.
+detections on every run, so changing `DETECT_MIN` or `FALLBACK_MIN` doesn't re-run the detector. Images
+detected before animals were added keep their cat-only boxes, so their crop IDs and review decisions stay valid.
+`catScore` is a historical name: it is the probability that an image shows an animal.
 
 ### Review tool
 
@@ -112,7 +122,8 @@ any mistakes. Explicit decisions always win over auto-keep.
 | Click, shift-click, ⌘/ctrl-click | Select; with a selection, `K`/`X`/`S` apply to all of it |
 
 "Reject rest of page" rejects every undecided crop on the page. The Rescue tab lists images that produced no
-crop, most cat-like first; keeping one adds the whole image (press `R` to box the cat). Hover or focus a tile to
+crop, most animal-like first; keeping one adds the whole image (press `R` to box the creature). Only historical
+works are listed. Hover or focus a tile to
 see the full artwork. Every decision is saved immediately. Anything left undecided in the Review and Rescue tabs counts as rejected.
 
 ## Site
@@ -128,19 +139,24 @@ index. The visitor picks a photo (HEIC is converted in the browser when needed),
 gets the top 10 matches:
 
 1. CLIP turns the crop into a 512-number embedding.
-2. Optionally (`adjust`) the embedding is shifted by `text("a painting of a cat") - text("a photo of a cat")`.
-3. Optionally (`center`) average embeddings are subtracted from the query and every indexed crop, so what all cat
-   images share stops dominating and color, markings and pose decide. `kind` uses separate averages for photos
-   and art (the visitor's photo uses the photo average); `global` uses one.
+2. `center`: average embeddings are subtracted from the query and every indexed crop, so what all the images
+   share stops dominating. `kind` uses separate averages for photos and art (the visitor's photo uses the photo
+   average); `global` uses one.
+3. `removeSpecies`: the directions CLIP uses to tell species apart (from text embeddings of 60 creature names in
+   `scripts/lib/creatures.ts`) are projected out, so matching runs on coloring, markings, pose and expression,
+   and a grey cat can match an owl.
 4. `score = cosine * w + colorSimilarity * (1 - w)`, comparing small Lab palettes of the central region.
 
-Defaults live in `shared/config.ts` (currently adjust off, center `kind`, `w` 0.85). The shift was turned off
-because it adds the same large vector to every query, which made the same few images win for every cat.
+Each crop also gets a creature name (CLIP's best guess among the same 60 names) for "Your cat is an owl".
 
-`npm run eval` scores the photos in `eval/photos/` (JPEG, PNG, WebP or HEIC) under 12 combinations of these
+Defaults live in `shared/config.ts` (center `kind`, species removed, `w` 0.75). An earlier step that shifted
+photos toward "a painting" (`adjust`) is off: it added the same large vector to every query, which made the same
+few images win for every cat.
+
+`npm run eval` scores the photos in `eval/photos/` (JPEG, PNG, WebP or HEIC) under 7 combinations of these
 settings and writes `eval/report.html`: a summary of how varied each setting's results are (distinct images in
-the top 3 across all photos, how many photos share the same #1, photo/art mix) and every photo's top 3 per
-setting.
+the top 3 across all photos, how many photos share the same #1, how many different creatures appear, how often
+the #1 isn't a cat) and every photo's top 3 per setting.
 
 ### Deploy
 

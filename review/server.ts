@@ -5,6 +5,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { cutCrop, padBox } from '../scripts/lib/models.ts';
 import { isAutoKeep } from '../scripts/lib/kept.ts';
+import { isHistorical } from '../scripts/lib/historical.ts';
 import { loadArtworks, readJson, writeJson } from '../scripts/lib/io.ts';
 import { CROPS, CROP_RECORDS, REVIEW, ROOT, SCORES, imagePath } from '../scripts/lib/paths.ts';
 import { CROP_PAD, CROP_SIZE } from '../scripts/lib/thresholds.ts';
@@ -39,7 +40,10 @@ function buildItems(): { crops: Item[]; auto: Item[]; rescue: Item[] } {
     const a = artworks.get(key);
     return { title: a?.title ?? key, artist: a?.artist ?? '', date: a?.date ?? '' };
   };
+  // Modern works never reach the site, so they aren't shown for review either.
+  const historical = (key: string) => isHistorical(artworks.get(key), scores[key]);
   const cropItems: Item[] = crops
+    .filter((c) => historical(c.artworkId))
     .map((c) => ({
       cropId: c.cropId,
       artworkId: c.artworkId,
@@ -54,7 +58,7 @@ function buildItems(): { crops: Item[]; auto: Item[]; rescue: Item[] } {
   // Rescue: every scored image that produced no crop, most cat-like first.
   const cropped = new Set(crops.map((c) => c.artworkId));
   const rescueItems: Item[] = Object.entries(scores)
-    .filter(([key]) => !cropped.has(key))
+    .filter(([key]) => !cropped.has(key) && historical(key))
     .sort((a, b) => b[1].catScore - a[1].catScore)
     .map(([key, s]) => ({
       cropId: `${key}-full`,

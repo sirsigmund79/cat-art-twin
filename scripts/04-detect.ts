@@ -1,11 +1,12 @@
-// Phase 2b: OWL-ViT "a cat" boxes for every image above CLASSIFY_MIN.
+// Phase 2b: OWL-ViT animal boxes for every historical image above CLASSIFY_MIN.
 // Writes data/detections.json (raw results, for resuming), data/crops.json and data/crops/<source>-<id>-<n>.jpg.
 import fs from 'node:fs';
 import path from 'node:path';
-import { cutCrop, loadCatDetector, padBox, toRawImage, type Detection } from './lib/models.ts';
-import { forEachWithCheckpoint, readJson, writeJson } from './lib/io.ts';
+import { isHistorical } from './lib/historical.ts';
+import { cutCrop, loadAnimalDetector, padBox, toRawImage, type Detection } from './lib/models.ts';
+import { forEachWithCheckpoint, loadArtworks, readJson, writeJson } from './lib/io.ts';
 import { CROPS, CROP_RECORDS, DETECTIONS, SCORES, imagePath } from './lib/paths.ts';
-import { CLASSIFY_MIN, CROP_PAD, CROP_SIZE, DETECT_BEST_MIN, DETECT_MIN, FALLBACK_MIN } from './lib/thresholds.ts';
+import { CLASSIFY_MIN, CROP_PAD, CROP_SIZE, DETECT_BEST_MIN, DETECT_LABELS, DETECT_MIN, FALLBACK_MIN } from './lib/thresholds.ts';
 import type { CropRecord, ScoreRecord } from './lib/types.ts';
 
 async function main() {
@@ -13,14 +14,16 @@ async function main() {
   const detections = readJson<Record<string, Detection[]>>(DETECTIONS, {});
   // Images detected on an earlier run stay candidates even if a rescore dropped them below
   // CLASSIFY_MIN, so their crop IDs (and any review decisions on them) don't disappear.
+  // Modern images never reach the site, so they aren't worth detector time.
+  const artworks = loadArtworks();
   const candidates = Object.entries(scores)
-    .filter(([key, s]) => s.catScore >= CLASSIFY_MIN || detections[key])
+    .filter(([key, s]) => detections[key] || (s.catScore >= CLASSIFY_MIN && isHistorical(artworks.get(key), s)))
     .map(([key]) => key);
   const todo = candidates.filter((k) => !detections[k]);
-  console.log(`${candidates.length} candidates (catScore >= ${CLASSIFY_MIN}), ${todo.length} still to detect`);
+  console.log(`${candidates.length} candidates (historical, animal score >= ${CLASSIFY_MIN}), ${todo.length} still to detect`);
 
   if (todo.length) {
-    const detect = await loadCatDetector();
+    const detect = await loadAnimalDetector(DETECT_LABELS);
     await forEachWithCheckpoint(
       todo,
       async (key) => {

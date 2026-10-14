@@ -153,3 +153,89 @@ test('europeana: keeps CC BY-NC and public domain, drops ND and rights-reserved'
   ]);
   assert.equal(records[0].provider, 'Rijksmuseum');
 });
+
+test('wikidata: finds animal taxa, maps artworks, takes license and thumbnail from Commons', async () => {
+  requested.length = 0;
+  const { fetchWikidata } = await import('../../scripts/lib/sources/wikidata.ts');
+  const ent = (q: string) => ({ value: `http://www.wikidata.org/entity/${q}` });
+  respond = (url) => {
+    if (url.hostname === 'query.wikidata.org') {
+      const q = url.searchParams.get('query')!;
+      if (q.includes('COUNT(DISTINCT')) return { results: { bindings: [{ depicts: ent('Q146') }, { depicts: ent('Q10884') }] } };
+      if (q.includes('wdt:P171*')) return { results: { bindings: [{ depicts: ent('Q146') }] } }; // Q10884 (a tree) isn't an animal
+      return {
+        results: {
+          bindings: [
+            { item: ent('Q1'), itemLabel: { value: 'Girl with a Cat' }, image: { value: 'http://commons.wikimedia.org/wiki/Special:FilePath/Girl%20with%20cat.jpg' }, creatorLabel: { value: 'Jan Steen' }, year: { value: '1660' } },
+            { item: ent('Q1'), itemLabel: { value: 'Girl with a Cat' }, image: { value: 'http://commons.wikimedia.org/wiki/Special:FilePath/Girl%20with%20cat.jpg' }, creatorLabel: { value: 'Workshop' } },
+            { item: ent('Q2'), itemLabel: { value: 'Q2' }, image: { value: 'http://commons.wikimedia.org/wiki/Special:FilePath/Cat_print.jpg' } },
+          ],
+        },
+      };
+    }
+    // Commons imageinfo by title.
+    return {
+      query: {
+        normalized: [{ from: 'File:Cat print.jpg', to: 'File:Cat print.jpg' }],
+        pages: {
+          10: commonsPage(10, meta('Public domain', '')),
+          11: { ...commonsPage(11, meta('CC BY-SA 4.0', 'https://creativecommons.org/licenses/by-sa/4.0/', 'Uploader')), title: 'File:Cat print.jpg' },
+        },
+      },
+    };
+  };
+  // commonsPage(10) is titled "File:Cat_10.jpg"; give it the first artwork's title instead.
+  const base = respond;
+  respond = (url) => {
+    const r = base(url) as { query?: { pages: Record<string, { title: string }> } };
+    if (r.query?.pages?.[10]) r.query.pages[10].title = 'File:Girl with cat.jpg';
+    return r;
+  };
+  const records = await fetchWikidata();
+  assert.deepEqual(
+    records.map((r) => [r.id, r.source, r.title, r.artist, r.date, r.license]),
+    [
+      ['Q1', 'wikidata', 'Girl with a Cat', 'Jan Steen', '1660', 'Public domain'],
+      ['Q2', 'wikidata', 'Sleeping cat', 'Uploader', '1890', 'CC BY-SA 4.0'],
+    ],
+  );
+  const animalCheck = requested.find((u) => new URL(u).searchParams.get('query')?.includes('wdt:P171*'))!;
+  assert.match(new URL(animalCheck).searchParams.get('query')!, /wd:Q146 wd:Q10884/);
+  const works = requested.find((u) => new URL(u).searchParams.get('query')?.includes('wdt:P18 ?image'))!;
+  assert.doesNotMatch(new URL(works).searchParams.get('query')!, /Q10884/, 'non-animals are not queried');
+});
+
+test('bhl: looks up the BHL account, searches its photos, hides page-id titles', async () => {
+  requested.length = 0;
+  const { fetchBhl } = await import('../../scripts/lib/sources/flickr.ts');
+  process.env.BHL_MAX = '2';
+  respond = (url) => {
+    const method = url.searchParams.get('method');
+    if (method === 'flickr.photos.licenses.getInfo') {
+      return { stat: 'ok', licenses: { license: [{ id: 7, name: 'No known copyright restrictions', url: 'https://www.flickr.com/commons/usage/' }] } };
+    }
+    if (method === 'flickr.urls.lookupUser') return { stat: 'ok', user: { id: '123@N02' } };
+    return {
+      stat: 'ok',
+      photos: {
+        page: 1,
+        pages: 1,
+        total: 2,
+        photo: [
+          { id: '21', owner: '123@N02', title: 'n45_w1150', license: '7', url_c: 'https://live.staticflickr.com/21_c.jpg' },
+          { id: '22', owner: '123@N02', title: 'The lynx', license: '7', url_z: 'https://live.staticflickr.com/22_z.jpg' },
+        ],
+      },
+    };
+  };
+  const records = await fetchBhl();
+  const search = new URL(requested.find((u) => u.includes('photos.search'))!);
+  assert.equal(search.searchParams.get('user_id'), '123@N02');
+  assert.deepEqual(
+    records.map((r) => [r.id, r.source, r.title, r.date, r.license]),
+    [
+      ['21', 'bhl', 'Natural history illustration', '', 'Public domain'],
+      ['22', 'bhl', 'The lynx', '', 'Public domain'],
+    ],
+  );
+});

@@ -89,11 +89,11 @@ export interface Detection {
   score: number;
 }
 
-export async function loadCatDetector() {
+export async function loadAnimalDetector(labels: string[]) {
   const detector = await withRetry('OWL-ViT detector', () => pipeline('zero-shot-object-detection', DETECTOR_MODEL));
-  /** Cat boxes above `threshold`, in normalized coordinates, after non-max suppression. */
+  /** Boxes matching any label above `threshold`, in normalized coordinates, after non-max suppression. */
   return async (image: RawImage, threshold: number): Promise<Detection[]> => {
-    const out = await detector(image, ['a cat'], { threshold, percentage: false });
+    const out = await detector(image, labels, { threshold, percentage: false });
     const dets = out.map((d) => {
       const x0 = clamp01(d.box.xmin / image.width);
       const y0 = clamp01(d.box.ymin / image.height);

@@ -1,11 +1,15 @@
-// Europeana: images from thousands of European museums, libraries and archives, including recent
-// CC-licensed work. Needs a free API key in EUROPEANA_API_KEY (https://pro.europeana.eu/page/get-api).
+// Europeana: images of animals from thousands of European museums, libraries and archives, dated
+// before 1960. Needs a free API key in EUROPEANA_API_KEY (https://pro.europeana.eu/page/get-api).
 import { normalizeLicense } from '../licenses.ts';
 import type { ArtworkRecord } from '../types.ts';
 import { cachedJson, cap, clean } from './common.ts';
 
 const API = 'https://api.europeana.eu/record/v2/search.json';
-const QUERY = 'cat OR cats OR kitten OR Katze OR chat OR gatto OR kat OR kot OR gato OR chaton';
+const QUERY =
+  'cat OR kitten OR Katze OR chat OR gatto OR kat OR dog OR horse OR lion OR fox OR owl OR monkey OR rabbit OR ' +
+  'deer OR bird OR parrot OR bear OR tiger OR goat OR sheep OR cow';
+/** Only works dated before 1960 (Europeana's YEAR field). */
+const YEARS = 'YEAR:[1000 TO 1959]';
 
 interface EuropeanaItem {
   id: string;
@@ -43,6 +47,7 @@ export async function fetchEuropeana(): Promise<ArtworkRecord[]> {
       profile: 'standard',
     });
     params.append('qf', 'TYPE:IMAGE');
+    params.append('qf', YEARS);
     // "open" = PD, CC0, BY, BY-SA; "restricted" adds NC and ND, so ND is filtered out below.
     params.append('reusability', 'open');
     params.append('reusability', 'restricted');

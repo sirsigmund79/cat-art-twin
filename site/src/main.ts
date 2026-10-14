@@ -8,6 +8,7 @@ import type { MetaItem } from '../../shared/types.ts';
 import { Clip } from './clip.ts';
 import { loadArtData, type ArtData } from './data.ts';
 import { toBrowserImage } from './heic.ts';
+import { withArticle } from './text.ts';
 import { canvasToBlob, renderShareCard } from './share.ts';
 
 const TOP_K = 10;
@@ -145,7 +146,7 @@ $('find').addEventListener('click', async () => {
   if (!cropper) return;
   const button = $<HTMLButtonElement>('find');
   button.disabled = true;
-  button.textContent = 'Searching for your twin…';
+  button.textContent = 'Searching the archives…';
   try {
     catCanvas = cropper.getCroppedCanvas({ maxWidth: 1024, maxHeight: 1024, imageSmoothingQuality: 'high' });
     const [data, embedding] = await Promise.all([dataPromise, clip.embed(await canvasToBlob(catCanvas, 'image/jpeg'))]);
@@ -154,7 +155,6 @@ $('find').addEventListener('click', async () => {
     matches = rank(embedding, data.index, {
       adjust: DEFAULT_SCORING.adjust,
       w: DEFAULT_SCORING.w,
-      center: data.center,
       topK: TOP_K,
       textPhoto: data.meta.textPhoto,
       textPainting: data.meta.textPainting,
@@ -172,7 +172,7 @@ $('find').addEventListener('click', async () => {
     showError(`Matching failed: ${(err as Error).message}`);
   } finally {
     button.disabled = false;
-    button.textContent = "Find my cat's twin";
+    button.textContent = "Find my cat's creature";
   }
 });
 
@@ -180,7 +180,13 @@ function renderMatch() {
   const item = items[matches[current].index];
   $<HTMLImageElement>('twin-img').src = item.crop;
   $<HTMLImageElement>('twin-img').alt = item.title;
-  $('twin-rank').textContent = current === 0 ? (item.kind === 'photo' ? 'Photo twin' : 'Art twin') : `Match #${current + 1}`;
+  const creature = item.creature ? withArticle(item.creature) : '';
+  $('twin-rank').textContent =
+    current === 0
+      ? creature
+        ? `Your cat is ${creature}`
+        : "Your cat's creature"
+      : `Match #${current + 1}${creature ? `: ${creature}` : ''}`;
   $('twin-title').textContent = item.title;
   $('twin-byline').textContent = [item.artist, item.date].filter(Boolean).join(', ');
   const license = $<HTMLAnchorElement>('twin-license');
@@ -218,15 +224,16 @@ $('download').addEventListener('click', async () => {
   const { blob } = await shareBlob();
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'cat-art-twin.png';
+  a.download = 'what-creature-is-my-cat.png';
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
 });
 
 $('share').addEventListener('click', async () => {
   const { blob, item } = await shareBlob();
-  const file = new File([blob], 'cat-art-twin.png', { type: 'image/png' });
-  const text = `My cat's twin: ${item.title}${item.artist ? ` by ${item.artist}` : ''} (${item.museum}, ${item.license})`;
+  const file = new File([blob], 'what-creature-is-my-cat.png', { type: 'image/png' });
+  const intro = item.creature ? `My cat is ${withArticle(item.creature)}` : "My cat's creature";
+  const text = `${intro}: ${item.title}${item.artist ? ` by ${item.artist}` : ''} (${item.museum}, ${item.license})`;
   if (navigator.canShare?.({ files: [file] })) {
     try {
       await navigator.share({ files: [file], text, url: location.href });

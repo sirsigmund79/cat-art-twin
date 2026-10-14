@@ -1,10 +1,10 @@
-// Phase 2a: zero-shot CLIP score for "is this a cat (artwork or photo)?" -> data/scores.json.
-// Also records whether CLIP sees the image as a photo or as art.
+// Phase 2a: zero-shot CLIP score for "does this show an animal (artwork or photo)?" -> data/scores.json.
+// Also records whether CLIP sees the image as a photo or as art, and how old it looks.
 import fs from 'node:fs';
 import { loadClipText, loadClipVision, toRawImage } from './lib/models.ts';
 import { forEachWithCheckpoint, readJson, writeJson } from './lib/io.ts';
 import { IMAGES, SCORES, imagePath } from './lib/paths.ts';
-import { CAT_PROMPTS, CLASSIFY_MIN, DECOY_PROMPTS, PROMPTS_VERSION } from './lib/thresholds.ts';
+import { CAT_PROMPTS, CLASSIFY_MIN, DECOY_PROMPTS, ERA_PROMPTS, PROMPTS_VERSION } from './lib/thresholds.ts';
 import type { ScoreRecord } from './lib/types.ts';
 
 const BATCH = 16;
@@ -22,7 +22,10 @@ async function main() {
   console.log(`${keys.length} images, ${keys.length - todo.length} already scored, ${todo.length} to go`);
 
   const prompts = [CAT_PROMPTS.art, CAT_PROMPTS.photo, ...DECOY_PROMPTS];
-  const textEmbeds = await (await loadClipText())(prompts);
+  const eraPrompts = [...ERA_PROMPTS.old, ...ERA_PROMPTS.modern];
+  const encodeText = await loadClipText();
+  const textEmbeds = await encodeText(prompts);
+  const eraEmbeds = await encodeText(eraPrompts);
   const embed = await loadClipVision();
 
   const batches: string[][] = [];
@@ -36,7 +39,10 @@ async function main() {
       batch.forEach((key, i) => {
         const logits = textEmbeds.map((t) => LOGIT_SCALE * dot(vecs[i], t));
         const probs = softmax(logits);
+        const era = softmax(eraEmbeds.map((t) => LOGIT_SCALE * dot(vecs[i], t)));
+        const old = era.slice(0, ERA_PROMPTS.old.length).reduce((a, b) => a + b, 0);
         scores[key] = {
+          old: round(old),
           catScore: round(probs[0] + probs[1]),
           kind: probs[1] > probs[0] ? 'photo' : 'art',
           v: PROMPTS_VERSION,

@@ -20,11 +20,16 @@ export const DEFAULT_SCORING = {
   adjust: false,
   /** Subtract average embeddings before comparing (see CenterMode in score.ts). */
   center: 'kind' as 'off' | 'global' | 'kind',
+  /** Project out species directions, so a cat can match any creature that looks like it. */
+  removeSpecies: true,
   /** Weight of CLIP similarity versus color similarity (1 = CLIP only). */
-  w: 0.85,
+  w: 0.75,
 };
 
 /** Number of colors in each palette. */
 export const PALETTE_SIZE = 4;
 /** Fraction of each side kept when taking the central region for palettes. */
 export const PALETTE_CENTER = 0.6;
+
+/** Only works from before this year go into the index (see scripts/lib/historical.ts). */
+export const HISTORICAL_BEFORE = 1960;

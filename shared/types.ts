@@ -1,4 +1,4 @@
-export type Source = 'met' | 'aic' | 'cma' | 'commons' | 'flickr' | 'europeana';
+export type Source = 'met' | 'aic' | 'cma' | 'commons' | 'flickr' | 'europeana' | 'wikidata' | 'bhl';
 
 /** Whether CLIP sees the image as a photograph or as art (painting, print, drawing...). */
 export type Kind = 'photo' | 'art';
@@ -26,6 +26,8 @@ export interface MetaItem {
   /** Link to the license text; empty for public domain works without one. */
   licenseUrl: string;
   kind: Kind;
+  /** CLIP's best guess at the creature, e.g. "fox" (from CREATURES in scripts/lib/creatures.ts). */
+  creature?: string;
   colors: PaletteColor[];
   starred: boolean;
 }
@@ -40,6 +42,8 @@ export interface SiteMeta {
   textPainting: number[];
   /** Mean of the normalized index vectors: overall, and per kind when both kinds are present. */
   means?: { all: number[]; art?: number[]; photo?: number[] };
+  /** Orthonormal directions that separate animal species in CLIP space; projected out when matching. */
+  speciesBasis?: number[][];
   /** Same order as the vectors in index.bin. */
   items: MetaItem[];
 }
@@ -51,4 +55,6 @@ export const SOURCE_NAMES: Record<Source, string> = {
   commons: 'Wikimedia Commons',
   flickr: 'Flickr',
   europeana: 'Europeana',
+  wikidata: 'Wikimedia Commons',
+  bhl: 'Biodiversity Heritage Library',
 };

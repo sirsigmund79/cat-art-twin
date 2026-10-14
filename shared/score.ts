@@ -9,6 +9,12 @@ export function normalize(v: ArrayLike<number>): Float32Array {
   return out;
 }
 
+export function dot(a: ArrayLike<number>, b: ArrayLike<number>): number {
+  let s = 0;
+  for (let i = 0; i < a.length; i++) s += a[i] * b[i];
+  return s;
+}
+
 /** Move a photo embedding toward painting space: photo - text(photo) + text(painting), re-normalized. */
 export function adjustEmbedding(
   photo: ArrayLike<number>,
@@ -32,10 +38,24 @@ export function quantizeInt8(v: ArrayLike<number>): Int8Array {
   return out;
 }
 
+/** Orthonormalize vectors (Gram-Schmidt), dropping ones that are (nearly) dependent. */
+export function orthonormalize(vectors: ArrayLike<number>[]): Float32Array[] {
+  const basis: Float32Array[] = [];
+  for (const v of vectors) {
+    const r = Float32Array.from(v);
+    for (const b of basis) {
+      const d = dot(r, b);
+      for (let j = 0; j < r.length; j++) r[j] -= d * b[j];
+    }
+    const n = Math.sqrt(dot(r, r));
+    if (n > 1e-4) basis.push(r.map((x) => x / n));
+  }
+  return basis;
+}
+
 /** An int8 index of `count` vectors of length `dim`, stored back to back. */
 export class Int8Index {
   readonly count: number;
-  private readonly norms: Float32Array;
 
   constructor(
     readonly data: Int8Array,
@@ -43,65 +63,103 @@ export class Int8Index {
   ) {
     if (data.length % dim !== 0) throw new Error(`index length ${data.length} is not a multiple of ${dim}`);
     this.count = data.length / dim;
-    this.norms = new Float32Array(this.count);
-    for (let i = 0; i < this.count; i++) {
-      let s = 0;
-      for (let j = i * dim, end = j + dim; j < end; j++) s += data[j] * data[j];
-      this.norms[i] = Math.sqrt(s) || 1;
-    }
   }
 
-  private meanDots = new WeakMap<object, Float32Array>();
-
-  /**
-   * Cosine similarity of a normalized, already-centered query against every vector after
-   * subtracting its group's mean: cos(q, v/|v| - means[group[i]]). Expanded so it needs one pass:
-   * (q.v/|v| - q.m) / sqrt(1 - 2 m.v/|v| + m.m). The m.v terms are cached per `means` array.
-   */
-  cosineCentered(query: Float32Array, means: ArrayLike<number>[], group: ArrayLike<number>): Float32Array {
-    const { data, dim } = this;
-    let mv = this.meanDots.get(means);
-    if (!mv) {
-      mv = new Float32Array(this.count);
-      for (let i = 0; i < this.count; i++) {
-        const m = means[group[i]];
-        let s = 0;
-        for (let j = 0, base = i * dim; j < dim; j++) s += m[j] * data[base + j];
-        mv[i] = s / this.norms[i];
-      }
-      this.meanDots.set(means, mv);
-    }
-    const qm = means.map((m) => dot(query, m));
-    const mm = means.map((m) => dot(m, m));
-    const out = new Float32Array(this.count);
-    for (let i = 0; i < this.count; i++) {
-      const g = group[i];
-      let s = 0;
-      const base = i * dim;
-      for (let j = 0; j < dim; j++) s += query[j] * data[base + j];
-      out[i] = (s / this.norms[i] - qm[g]) / Math.sqrt(Math.max(1e-9, 1 - 2 * mv[i] + mm[g]));
-    }
-    return out;
-  }
-
-  /** Cosine similarity of a normalized query against every vector. Per-vector scale cancels out. */
-  cosineAll(query: Float32Array): Float32Array {
-    const { data, dim } = this;
-    const out = new Float32Array(this.count);
-    for (let i = 0; i < this.count; i++) {
-      let s = 0;
-      const base = i * dim;
-      for (let j = 0; j < dim; j++) s += query[j] * data[base + j];
-      out[i] = s / this.norms[i];
-    }
-    return out;
+  /** Vector i, L2-normalized. */
+  unit(i: number): Float32Array {
+    return normalize(this.data.subarray(i * this.dim, (i + 1) * this.dim));
   }
 }
 
-function dot(a: ArrayLike<number>, b: ArrayLike<number>): number {
-  let s = 0;
-  for (let i = 0; i < a.length; i++) s += a[i] * b[i];
-  return s;
+/**
+ * Changes applied to every embedding before comparing.
+ *
+ * - Centering: subtract the average embedding. What every image shares otherwise lets a few generic
+ *   "hub" images win for every query. Separate means for art and photos ('kind', with the photo mean
+ *   for the visitor's photo) also cancel the photo-vs-art difference.
+ * - Species removal: project out the directions CLIP uses to tell animal species apart (from text
+ *   embeddings of animal names), so matching runs on coloring, markings, pose and expression, and a
+ *   cat can match an owl or a fox.
+ */
+export type CenterMode = 'off' | 'global' | 'kind';
+
+export interface Transform {
+  means?: ArrayLike<number>[];
+  /** Index into `means` for each index vector. */
+  group?: ArrayLike<number>;
+  queryMean?: ArrayLike<number>;
+  /** Orthonormal directions to project out. */
+  basis?: ArrayLike<number>[];
+}
+
+export function makeTransform(meta: SiteMeta, opts: { center: CenterMode; removeSpecies: boolean }): Transform {
+  const t: Transform = {};
+  const m = meta.means;
+  if (opts.center !== 'off' && m) {
+    if (opts.center === 'kind' && m.art && m.photo) {
+      t.means = [m.art, m.photo];
+      t.group = Uint8Array.from(meta.items, (i) => (i.kind === 'photo' ? 1 : 0));
+      t.queryMean = m.photo;
+    } else {
+      t.means = [m.all];
+      t.group = new Uint8Array(meta.count);
+      t.queryMean = m.all;
+    }
+  }
+  if (opts.removeSpecies && meta.speciesBasis?.length) t.basis = meta.speciesBasis;
+  return t;
+}
+
+/** normalize -> subtract mean -> project out basis -> normalize. */
+export function applyTransform(v: ArrayLike<number>, mean: ArrayLike<number> | undefined, basis?: ArrayLike<number>[]): Float32Array {
+  const out = normalize(v);
+  if (mean) for (let j = 0; j < out.length; j++) out[j] -= mean[j];
+  if (basis) {
+    for (const b of basis) {
+      const d = dot(out, b);
+      for (let j = 0; j < out.length; j++) out[j] -= d * b[j];
+    }
+  }
+  return normalize(out);
+}
+
+/** The index with a Transform applied once up front, so each search is a plain dot product per item. */
+export class PreparedIndex {
+  readonly count: number;
+  readonly dim: number;
+  private readonly vecs: Float32Array;
+
+  constructor(
+    index: Int8Index,
+    readonly transform: Transform = {},
+  ) {
+    this.count = index.count;
+    this.dim = index.dim;
+    this.vecs = new Float32Array(index.count * index.dim);
+    const { means, group, basis } = transform;
+    for (let i = 0; i < index.count; i++) {
+      const mean = means && group ? means[group[i]] : undefined;
+      this.vecs.set(applyTransform(index.unit(i), mean, basis), i * index.dim);
+    }
+  }
+
+  /** Transform a query embedding the same way (with the query mean). */
+  prepareQuery(v: ArrayLike<number>): Float32Array {
+    return applyTransform(v, this.transform.queryMean, this.transform.basis);
+  }
+
+  /** Cosine similarity of a prepared query against every item. */
+  scores(query: Float32Array): Float32Array {
+    const { vecs, dim } = this;
+    const out = new Float32Array(this.count);
+    for (let i = 0; i < this.count; i++) {
+      let s = 0;
+      const base = i * dim;
+      for (let j = 0; j < dim; j++) s += query[j] * vecs[base + j];
+      out[i] = s;
+    }
+    return out;
+  }
 }
 
 function deltaE(a: [number, number, number], b: [number, number, number]): number {
@@ -127,37 +185,8 @@ export function colorSimilarity(a: PaletteColor[], b: PaletteColor[]): number {
   return (oneWay(a, b) + oneWay(b, a)) / 2;
 }
 
-/**
- * Subtracting the average embedding removes what every cat image shares ("this is a cat"), which
- * otherwise lets a few generic "hub" images win for every query. 'kind' uses separate means for art
- * and photos (and the photo mean for the visitor's photo), so the photo/art difference cancels too.
- */
-export type CenterMode = 'off' | 'global' | 'kind';
-
-export interface Centering {
-  means: ArrayLike<number>[];
-  /** Index into `means` for each index vector. */
-  group: ArrayLike<number>;
-  /** Mean subtracted from the query. */
-  queryMean: ArrayLike<number>;
-}
-
-export function makeCentering(meta: SiteMeta, mode: CenterMode): Centering | undefined {
-  const m = meta.means;
-  if (mode === 'off' || !m) return undefined;
-  if (mode === 'global' || !m.art || !m.photo) {
-    return { means: [m.all], group: new Uint8Array(meta.count), queryMean: m.all };
-  }
-  return {
-    means: [m.art, m.photo],
-    group: Uint8Array.from(meta.items, (i) => (i.kind === 'photo' ? 1 : 0)),
-    queryMean: m.photo,
-  };
-}
-
 export interface RankOptions {
   adjust: boolean;
-  center?: Centering;
   w: number;
   topK: number;
   textPhoto: ArrayLike<number>;
@@ -173,19 +202,10 @@ export interface Match {
   color: number;
 }
 
-/** score = cosine(query, art) * w + colorSimilarity * (1 - w); returns the top K, best first. */
-export function rank(photoEmbedding: ArrayLike<number>, index: Int8Index, opts: RankOptions): Match[] {
-  let query = opts.adjust
-    ? adjustEmbedding(photoEmbedding, opts.textPhoto, opts.textPainting)
-    : normalize(photoEmbedding);
-  let clip: Float32Array;
-  if (opts.center) {
-    const qm = opts.center.queryMean;
-    query = normalize(query.map((x, j) => x - qm[j]));
-    clip = index.cosineCentered(query, opts.center.means, opts.center.group);
-  } else {
-    clip = index.cosineAll(query);
-  }
+/** score = cosine(query, item) * w + colorSimilarity * (1 - w); returns the top K, best first. */
+export function rank(photoEmbedding: ArrayLike<number>, index: PreparedIndex, opts: RankOptions): Match[] {
+  const raw = opts.adjust ? adjustEmbedding(photoEmbedding, opts.textPhoto, opts.textPainting) : photoEmbedding;
+  const clip = index.scores(index.prepareQuery(raw));
   const useColor = opts.w < 1 && opts.photoPalette && opts.palettes;
   const matches: Match[] = new Array(index.count);
   for (let i = 0; i < index.count; i++) {

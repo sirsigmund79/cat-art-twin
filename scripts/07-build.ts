@@ -6,6 +6,8 @@ import sharp from 'sharp';
 import { CLIP_DTYPE, CLIP_MODEL, EMBED_DIM, PAINTING_PROMPT, PHOTO_PROMPT } from '../shared/config.ts';
 import { SOURCE_NAMES, type MetaItem, type PaletteColor, type SiteMeta } from '../shared/types.ts';
 import { normalizeLicense } from './lib/licenses.ts';
+import { CREATURES, creaturePrompt } from './lib/creatures.ts';
+import { dot, normalize, orthonormalize } from '../shared/score.ts';
 import { loadKept } from './lib/kept.ts';
 import { loadClipText } from './lib/models.ts';
 import { loadArtworks, readJson, writeJson } from './lib/io.ts';
@@ -25,7 +27,12 @@ async function main() {
   const colors = readJson<Record<string, { palette: PaletteColor[] }>>(COLORS, {});
   const scores = readJson<Record<string, ScoreRecord>>(SCORES, {});
 
-  const [textPhoto, textPainting] = await (await loadClipText())([PHOTO_PROMPT, PAINTING_PROMPT]);
+  const encodeText = await loadClipText();
+  const [textPhoto, textPainting] = await encodeText([PHOTO_PROMPT, PAINTING_PROMPT]);
+  // One text embedding per creature (painting and photo prompts averaged), for labels and species removal.
+  const paintingTexts = await encodeText(CREATURES.map(creaturePrompt));
+  const photoTexts = await encodeText(CREATURES.map((c) => `a photo of a ${c}`));
+  const creatureTexts = paintingTexts.map((t, i) => normalize(t.map((x, j) => x + photoTexts[i][j])));
 
   const cropsDir = path.join(SITE_PUBLIC, 'crops');
   fs.rmSync(cropsDir, { recursive: true, force: true });
@@ -52,6 +59,7 @@ async function main() {
       license: license.label,
       licenseUrl: license.url,
       kind: scores[k.artworkId]?.kind ?? 'art',
+      creature: creatureOf(emb.vec, paintingTexts),
       colors: colors[k.cropId].palette,
       starred: k.starred,
     };
@@ -82,6 +90,12 @@ async function main() {
   });
   const mean = (k: keyof typeof sums) => (counts[k] ? Array.from(sums[k], (x) => round(x / counts[k])) : undefined);
 
+  // Species directions: each creature's text embedding minus their average, orthonormalized.
+  const avgText = Array.from({ length: EMBED_DIM }, (_, j) => creatureTexts.reduce((a, t) => a + t[j], 0) / creatureTexts.length);
+  const speciesBasis = orthonormalize(creatureTexts.map((t) => t.map((x, j) => x - avgText[j]))).map((b) =>
+    Array.from(b, (x) => Math.round(x * 1e4) / 1e4),
+  );
+
   const meta: SiteMeta = {
     model: CLIP_MODEL,
     dtype: CLIP_DTYPE,
@@ -90,6 +104,7 @@ async function main() {
     textPhoto: Array.from(textPhoto, round),
     textPainting: Array.from(textPainting, round),
     means: { all: mean('all')!, art: mean('art'), photo: mean('photo') },
+    speciesBasis,
     items,
   };
   fs.writeFileSync(path.join(SITE_PUBLIC, 'index.bin'), vectors);
@@ -100,9 +115,23 @@ async function main() {
   const cropBytes = fs.readdirSync(cropsDir).reduce((s, f) => s + fs.statSync(path.join(cropsDir, f)).size, 0);
   const mb = (n: number) => `${(n / 1024 / 1024).toFixed(2)} MB`;
   const photos = items.filter((i) => i.kind === 'photo').length;
-  console.log(`${items.length} cats: ${items.length - photos} art, ${photos} photos (${items.filter((i) => i.starred).length} starred)`);
+  console.log(`${items.length} creatures: ${items.length - photos} art, ${photos} photos (${items.filter((i) => i.starred).length} starred)`);
+  const byCreature = new Map<string, number>();
+  for (const i of items) byCreature.set(i.creature ?? '(unsure)', (byCreature.get(i.creature ?? '(unsure)') ?? 0) + 1);
+  console.log(`  ${[...byCreature].sort((a, b) => b[1] - a[1]).slice(0, 15).map(([c, n]) => `${c} ${n}`).join(', ')}`);
   console.log(`index.bin ${mb(binSize)} + meta.json ${mb(metaSize)} = ${mb(binSize + metaSize)} (target < 5 MB)`);
   console.log(`crops/ ${mb(cropBytes)}`);
+}
+
+/** CLIP's best creature label for a crop, or undefined when no label is reasonably likely. */
+function creatureOf(vec: number[], texts: Float32Array[]): string | undefined {
+  const v = normalize(vec);
+  const logits = texts.map((t) => 100 * dot(v, t));
+  const max = Math.max(...logits);
+  const exps = logits.map((l) => Math.exp(l - max));
+  const total = exps.reduce((a, b) => a + b, 0);
+  const best = exps.indexOf(1);
+  return exps[best] / total >= 0.3 ? CREATURES[best] : undefined;
 }
 
 main().catch((err) => {

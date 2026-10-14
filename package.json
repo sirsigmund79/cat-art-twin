@@ -1,7 +1,7 @@
 {
   "name": "cat-art-twin",
   "version": "1.0.0",
-  "description": "Find your cat's twin in centuries of art and photography. Matching runs in the browser.",
+  "description": "What creature is your cat? Match your cat to the creature in centuries of art that looks most like it. Matching runs in the browser.",
   "scripts": {
     "fetch": "tsx scripts/01-fetch.ts",
     "download": "tsx scripts/02-download.ts",

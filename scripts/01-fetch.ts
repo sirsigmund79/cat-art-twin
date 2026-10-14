@@ -1,6 +1,7 @@
 // Phase 1a: search the source APIs for cats and write normalized records to data/raw/<source>.jsonl.
-// Usage: npm run fetch [-- met aic cma commons flickr europeana]
-// With no arguments: every source that needs no key, plus flickr/europeana when their key is set.
+// Usage: npm run fetch [-- met aic cma commons wikidata bhl europeana flickr]
+// With no arguments: every historical source that needs no key, plus bhl/europeana when their key is set.
+// (flickr, modern cat photos, only runs when named.)
 import fs from 'node:fs';
 import path from 'node:path';
 import pThrottle from 'p-throttle';
@@ -9,12 +10,21 @@ import { readJson, writeJson, writeJsonl } from './lib/io.ts';
 import { CACHE, RAW } from './lib/paths.ts';
 import { fetchCommons } from './lib/sources/commons.ts';
 import { fetchEuropeana } from './lib/sources/europeana.ts';
-import { fetchFlickr } from './lib/sources/flickr.ts';
+import { fetchBhl, fetchFlickr } from './lib/sources/flickr.ts';
+import { fetchWikidata } from './lib/sources/wikidata.ts';
 import type { ArtworkRecord, Source } from './lib/types.ts';
 
 const CC0 = { license: 'CC0', licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/' };
 
 const TERMS = ['cat', 'cats', 'kitten', 'neko', 'chat', 'gatto', 'Katze'];
+/** Other creatures, for "What creature is your cat?". */
+const ANIMAL_TERMS = [
+  'dog', 'horse', 'lion', 'tiger', 'leopard', 'fox', 'wolf', 'bear', 'deer', 'rabbit', 'hare', 'squirrel',
+  'mouse', 'monkey', 'owl', 'eagle', 'falcon', 'parrot', 'peacock', 'rooster', 'duck', 'swan', 'heron',
+  'crane', 'bird', 'goat', 'sheep', 'cow', 'bull', 'elephant', 'camel', 'frog', 'dragon', 'animal',
+];
+/** The Met looks up every object at ~1.5 s each, so its animal terms (hours more) are opt-in. */
+const MET_TERMS = process.env.MET_ANIMALS ? [...TERMS, ...ANIMAL_TERMS] : TERMS;
 
 const clean = (s: unknown) => (typeof s === 'string' ? s.replace(/\s+/g, ' ').trim() : '');
 
@@ -102,7 +112,7 @@ async function fetchMet(): Promise<ArtworkRecord[]> {
   const WINDOW = 10_000;
   const searchCache = path.join(cacheDir, '_search.json');
   const searched = readJson<Record<string, number[]>>(searchCache, {});
-  for (const term of TERMS) {
+  for (const term of MET_TERMS) {
     if (searched[term]) continue;
     const termIds: number[] = [];
     let total = 0;
@@ -195,7 +205,7 @@ async function fetchAic(): Promise<ArtworkRecord[]> {
   const records: ArtworkRecord[] = [];
   const throttle = pThrottle({ limit: 1, interval: 1000 }); // AIC: 60 req/min anonymous
   const get = throttle(<T>(url: string) => fetchJson<T>(url));
-  for (const term of TERMS) {
+  for (const term of [...TERMS, ...ANIMAL_TERMS]) {
     // `q` (and a `query[...]` URL filter) came back ignored: every term returned the whole collection.
     // So the text match and the public-domain filter both go in an Elasticsearch query, sent as one
     // URL-encoded JSON `params` value, the form the AIC docs recommend for production use.
@@ -265,7 +275,7 @@ interface CmaResponse {
 
 async function fetchCma(): Promise<ArtworkRecord[]> {
   const records: ArtworkRecord[] = [];
-  for (const term of TERMS) {
+  for (const term of [...TERMS, ...ANIMAL_TERMS]) {
     for (let skip = 0; ; skip += 100) {
       const url =
         `https://openaccess-api.clevelandart.org/api/artworks/?q=${encodeURIComponent(term)}` +
@@ -300,12 +310,15 @@ const FETCHERS: Record<Source, () => Promise<ArtworkRecord[]>> = {
   commons: fetchCommons,
   flickr: fetchFlickr,
   europeana: fetchEuropeana,
+  wikidata: fetchWikidata,
+  bhl: fetchBhl,
 };
 
 function defaultSources(): Source[] {
-  const sources: Source[] = ['met', 'aic', 'cma', 'commons'];
-  if (process.env.FLICKR_API_KEY) sources.push('flickr');
-  else console.log('Skipping flickr: set FLICKR_API_KEY to include it.');
+  // Flickr's general search is mostly modern photos, which never reach the site; run it only by name.
+  const sources: Source[] = ['met', 'aic', 'cma', 'commons', 'wikidata'];
+  if (process.env.FLICKR_API_KEY) sources.push('bhl');
+  else console.log('Skipping bhl: set FLICKR_API_KEY to include it.');
   if (process.env.EUROPEANA_API_KEY) sources.push('europeana');
   else console.log('Skipping europeana: set EUROPEANA_API_KEY to include it.');
   return sources;

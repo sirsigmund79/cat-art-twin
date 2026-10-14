@@ -1,8 +1,9 @@
+import { isHistorical } from './historical.ts';
 import { padBox } from './models.ts';
-import { readJson } from './io.ts';
-import { CROP_RECORDS, REVIEW } from './paths.ts';
+import { loadArtworks, readJson } from './io.ts';
+import { CROP_RECORDS, REVIEW, SCORES } from './paths.ts';
 import { AUTO_KEEP_CAT, AUTO_KEEP_DET, CROP_PAD } from './thresholds.ts';
-import type { Box, CropRecord, ReviewEntry, ReviewFile } from './types.ts';
+import type { Box, CropRecord, ReviewEntry, ReviewFile, ScoreRecord } from './types.ts';
 
 export interface KeptCrop {
   cropId: string;
@@ -17,8 +18,20 @@ export function isAutoKeep(crop: CropRecord, entry?: ReviewEntry): boolean {
   return !entry?.decision && !crop.fallback && crop.catScore >= AUTO_KEEP_CAT && (crop.detScore ?? 0) >= AUTO_KEEP_DET;
 }
 
-/** Crops the reviewer kept or starred, plus auto-kept ones. Anything else undecided counts as rejected. */
+/**
+ * Crops the reviewer kept or starred, plus auto-kept ones, limited to historical works.
+ * Anything else undecided counts as rejected.
+ */
 export function loadKept(): KeptCrop[] {
+  const artworks = loadArtworks();
+  const scores = readJson<Record<string, ScoreRecord>>(SCORES, {});
+  const all = loadKeptAnyEra();
+  const kept = all.filter((k) => isHistorical(artworks.get(k.artworkId), scores[k.artworkId]));
+  if (kept.length < all.length) console.log(`  ${all.length - kept.length} kept crops left out as not historical`);
+  return kept;
+}
+
+function loadKeptAnyEra(): KeptCrop[] {
   const records = new Map(readJson<CropRecord[]>(CROP_RECORDS, []).map((c) => [c.cropId, c]));
   const review = readJson<ReviewFile>(REVIEW, {});
   const kept: KeptCrop[] = [];
