@@ -174,8 +174,15 @@ async function fetchMet(): Promise<ArtworkRecord[]> {
 
 // ---------- Art Institute of Chicago ----------
 interface AicResponse {
-  pagination: { total_pages: number };
-  data: { id: number; title: string; artist_display: string; date_display: string; image_id: string | null }[];
+  pagination: { total: number; total_pages: number };
+  data: {
+    id: number;
+    title: string;
+    artist_display: string;
+    date_display: string;
+    image_id: string | null;
+    is_public_domain: boolean;
+  }[];
 }
 
 async function fetchAic(): Promise<ArtworkRecord[]> {
@@ -183,15 +190,20 @@ async function fetchAic(): Promise<ArtworkRecord[]> {
   const throttle = pThrottle({ limit: 1, interval: 1000 }); // AIC: 60 req/min anonymous
   const get = throttle(<T>(url: string) => fetchJson<T>(url));
   for (const term of TERMS) {
+    // Search by text only and filter to public domain here: adding a `query[...]` filter to the URL
+    // replaces the text search, which returned the whole public-domain collection for every term.
     // AIC search results stop at 1,000 (10 pages of 100).
+    let total = 0;
+    let kept = 0;
     for (let page = 1; page <= 10; page++) {
       const url =
         `https://api.artic.edu/api/v1/artworks/search?q=${encodeURIComponent(term)}` +
-        `&query[term][is_public_domain]=true&fields=id,title,artist_display,date_display,image_id` +
-        `&limit=100&page=${page}`;
+        `&fields=id,title,artist_display,date_display,image_id,is_public_domain&limit=100&page=${page}`;
       const res = await get<AicResponse>(url);
+      total = res.pagination.total;
       for (const a of res.data) {
-        if (!a.image_id) continue;
+        if (!a.image_id || !a.is_public_domain) continue;
+        kept++;
         records.push({
           id: String(a.id),
           source: 'aic',
@@ -204,9 +216,10 @@ async function fetchAic(): Promise<ArtworkRecord[]> {
           license: 'Public domain (CC0), Art Institute of Chicago',
         });
       }
-      console.log(`  aic: "${term}" page ${page}/${res.pagination.total_pages}`);
       if (page >= res.pagination.total_pages) break;
     }
+    const capped = total > 1000 ? `, only the first 1,000 are served` : '';
+    console.log(`  aic: "${term}" -> ${total} matches${capped}; ${kept} public domain with images`);
   }
   return records;
 }
