@@ -30,11 +30,25 @@ async function fetchMet(): Promise<ArtworkRecord[]> {
   const throttle = pThrottle({ limit: 10, interval: 1000 });
   const get = throttle(<T>(url: string) => fetchJson<T>(url));
 
+  // v1/search was retired on 2026-10-01 (HTTP 410). v1.1 pages results: limit <= 500, and nothing
+  // past offset + limit = 10,000 is served. Object lookups stay on v1.
+  const PAGE = 500;
+  const WINDOW = 10_000;
   const ids = new Set<number>();
   for (const term of TERMS) {
-    const res = await get<{ objectIDs: number[] | null }>(`${base}/search?hasImages=true&q=${encodeURIComponent(term)}`);
-    for (const id of res.objectIDs ?? []) ids.add(id);
-    console.log(`  met: "${term}" -> ${res.objectIDs?.length ?? 0} ids`);
+    let total = 0;
+    let got = 0;
+    for (let offset = 0; offset < WINDOW; offset += PAGE) {
+      const res = await get<{ total: number; objectIDs: number[] | null }>(
+        `https://collectionapi.metmuseum.org/public/collection/v1.1/search?hasImages=true&q=${encodeURIComponent(term)}&offset=${offset}&limit=${PAGE}`,
+      );
+      total = res.total ?? 0;
+      for (const id of res.objectIDs ?? []) ids.add(id);
+      got += res.objectIDs?.length ?? 0;
+      if (!res.objectIDs?.length || offset + PAGE >= total) break;
+    }
+    const capped = total > WINDOW ? ` (API serves only the first ${WINDOW} of ${total})` : '';
+    console.log(`  met: "${term}" -> ${got} ids${capped}`);
   }
 
   const cacheDir = path.join(CACHE, 'met');
@@ -161,13 +175,26 @@ const FETCHERS: Record<Source, () => Promise<ArtworkRecord[]>> = { met: fetchMet
 
 async function main() {
   const sources = (process.argv.slice(2).length ? process.argv.slice(2) : Object.keys(FETCHERS)) as Source[];
+  const failed: Source[] = [];
   for (const source of sources) {
     if (!FETCHERS[source]) throw new Error(`unknown source ${source}`);
     console.log(`Fetching ${source}...`);
-    const records = await FETCHERS[source]();
+    // One museum's API breaking shouldn't stop the others.
+    let records: ArtworkRecord[];
+    try {
+      records = await FETCHERS[source]();
+    } catch (err) {
+      console.error(`${source} failed: ${(err as Error).message}`);
+      failed.push(source);
+      continue;
+    }
     const unique = new Map(records.map((r) => [`${r.source}-${r.id}`, r]));
     writeJsonl(path.join(RAW, `${source}.jsonl`), [...unique.values()]);
     console.log(`${source}: ${unique.size} public-domain records with images (${records.length - unique.size} duplicates removed)`);
+  }
+  if (failed.length) {
+    console.error(`\nFailed: ${failed.join(', ')}. Retry with: npm run fetch -- ${failed.join(' ')}`);
+    process.exitCode = 1;
   }
 }
 
