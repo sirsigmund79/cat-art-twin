@@ -17,6 +17,7 @@ Built on open source:
 | Image decoding, resizing, cropping | [sharp](https://sharp.pixelplumbing.com/) |
 | Color palettes | [culori](https://culorijs.org/) (Lab conversion) + [ml-kmeans](https://github.com/mljs/kmeans) |
 | Crop boxes (site and review tool) | [Cropper.js](https://github.com/fengyuanchen/cropperjs) |
+| iPhone HEIC photos in browsers that can't open them | [heic-to](https://github.com/hoppergee/heic-to) (libheif, LGPL-3.0), loaded only when needed |
 | Site build | [Vite](https://vite.dev/) |
 | Smoke test | [Playwright](https://playwright.dev/) |
 

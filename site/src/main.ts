@@ -7,6 +7,7 @@ import { rank, type Match } from '../../shared/score.ts';
 import type { MetaItem } from '../../shared/types.ts';
 import { Clip } from './clip.ts';
 import { loadArtData, type ArtData } from './data.ts';
+import { toBrowserImage } from './heic.ts';
 import { canvasToBlob, renderShareCard } from './share.ts';
 
 const TOP_K = 10;
@@ -83,14 +84,30 @@ let cropper: Cropper | null = null;
 let photoUrl: string | null = null;
 const cropImg = $<HTMLImageElement>('crop-img');
 
-$<HTMLInputElement>('file').addEventListener('change', (e) => {
-  const file = (e.target as HTMLInputElement).files?.[0];
+$<HTMLInputElement>('file').addEventListener('change', async (e) => {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
   if (!file) return;
+  const status = $('pick-status');
+  let image: Blob;
+  try {
+    image = await toBrowserImage(file, () => {
+      show('pick');
+      status.textContent = 'Converting your iPhone photo…';
+      status.hidden = false;
+    });
+  } catch (err) {
+    show('pick');
+    showError(`Couldn't open that photo: ${(err as Error).message}.`);
+    return;
+  } finally {
+    status.hidden = true;
+  }
   if (photoUrl) URL.revokeObjectURL(photoUrl);
-  photoUrl = URL.createObjectURL(file);
+  photoUrl = URL.createObjectURL(image);
   cropper?.destroy();
-  cropImg.src = photoUrl;
-  show('crop');
+  cropper = null;
   cropImg.onload = () => {
     cropper = new Cropper(cropImg, {
       viewMode: 1,
@@ -101,7 +118,8 @@ $<HTMLInputElement>('file').addEventListener('change', (e) => {
       background: false,
     });
   };
-  (e.target as HTMLInputElement).value = '';
+  cropImg.src = photoUrl;
+  show('crop');
 });
 
 $('crop-back').addEventListener('click', () => $('file').click());

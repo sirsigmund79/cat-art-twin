@@ -2,11 +2,21 @@ import path from 'node:path';
 import { expect, test } from '@playwright/test';
 
 const FIXTURE = path.join(import.meta.dirname, '..', 'fixtures', 'cat.jpg');
+const HEIC_FIXTURE = path.join(import.meta.dirname, '..', 'fixtures', 'cat.heic');
 
 test('landing page renders and promises privacy', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Cat Art Twin' })).toBeVisible();
   await expect(page.getByText('Your photo never leaves your device.')).toBeVisible();
+});
+
+test('an iPhone HEIC photo opens in the crop step', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#file').setInputFiles(HEIC_FIXTURE);
+  await expect(page.locator('#crop')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('.cropper-crop-box')).toBeVisible();
+  const size = await page.locator('#crop-img').evaluate((img: HTMLImageElement) => [img.naturalWidth, img.naturalHeight]);
+  expect(size).toEqual([451, 300]);
 });
 
 test('a cat photo gets an art twin with a credit link and a share image', async ({ page }) => {
