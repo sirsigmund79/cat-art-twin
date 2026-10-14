@@ -134,8 +134,8 @@ export function padBox(box: Box, pad: number): Box {
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
-/** Cut a normalized box out of an image file and fit it within `size` px as JPEG. */
-export async function cutCrop(file: string, box: Box | null, size: number): Promise<Buffer> {
+/** Cut a normalized box out of an upright image (file or buffer) and fit it within `size` px as JPEG. */
+export async function cutCrop(file: string | Buffer, box: Box | null, size: number): Promise<Buffer> {
   let img = sharp(file).rotate();
   if (box) {
     const { width = 0, height = 0 } = await sharp(file).rotate().metadata();

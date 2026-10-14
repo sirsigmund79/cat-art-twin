@@ -152,7 +152,9 @@ $('find').addEventListener('click', async () => {
     if (!data) throw new Error('the art index has not been built yet');
     items = data.meta.items;
     matches = rank(embedding, data.index, {
-      ...DEFAULT_SCORING,
+      adjust: DEFAULT_SCORING.adjust,
+      w: DEFAULT_SCORING.w,
+      center: data.center,
       topK: TOP_K,
       textPhoto: data.meta.textPhoto,
       textPainting: data.meta.textPainting,

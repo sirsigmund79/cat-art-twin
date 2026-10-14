@@ -1,4 +1,4 @@
-import type { PaletteColor } from './types.ts';
+import type { PaletteColor, SiteMeta } from './types.ts';
 
 export function normalize(v: ArrayLike<number>): Float32Array {
   let sum = 0;
@@ -51,6 +51,39 @@ export class Int8Index {
     }
   }
 
+  private meanDots = new WeakMap<object, Float32Array>();
+
+  /**
+   * Cosine similarity of a normalized, already-centered query against every vector after
+   * subtracting its group's mean: cos(q, v/|v| - means[group[i]]). Expanded so it needs one pass:
+   * (q.v/|v| - q.m) / sqrt(1 - 2 m.v/|v| + m.m). The m.v terms are cached per `means` array.
+   */
+  cosineCentered(query: Float32Array, means: ArrayLike<number>[], group: ArrayLike<number>): Float32Array {
+    const { data, dim } = this;
+    let mv = this.meanDots.get(means);
+    if (!mv) {
+      mv = new Float32Array(this.count);
+      for (let i = 0; i < this.count; i++) {
+        const m = means[group[i]];
+        let s = 0;
+        for (let j = 0, base = i * dim; j < dim; j++) s += m[j] * data[base + j];
+        mv[i] = s / this.norms[i];
+      }
+      this.meanDots.set(means, mv);
+    }
+    const qm = means.map((m) => dot(query, m));
+    const mm = means.map((m) => dot(m, m));
+    const out = new Float32Array(this.count);
+    for (let i = 0; i < this.count; i++) {
+      const g = group[i];
+      let s = 0;
+      const base = i * dim;
+      for (let j = 0; j < dim; j++) s += query[j] * data[base + j];
+      out[i] = (s / this.norms[i] - qm[g]) / Math.sqrt(Math.max(1e-9, 1 - 2 * mv[i] + mm[g]));
+    }
+    return out;
+  }
+
   /** Cosine similarity of a normalized query against every vector. Per-vector scale cancels out. */
   cosineAll(query: Float32Array): Float32Array {
     const { data, dim } = this;
@@ -63,6 +96,12 @@ export class Int8Index {
     }
     return out;
   }
+}
+
+function dot(a: ArrayLike<number>, b: ArrayLike<number>): number {
+  let s = 0;
+  for (let i = 0; i < a.length; i++) s += a[i] * b[i];
+  return s;
 }
 
 function deltaE(a: [number, number, number], b: [number, number, number]): number {
@@ -88,8 +127,37 @@ export function colorSimilarity(a: PaletteColor[], b: PaletteColor[]): number {
   return (oneWay(a, b) + oneWay(b, a)) / 2;
 }
 
+/**
+ * Subtracting the average embedding removes what every cat image shares ("this is a cat"), which
+ * otherwise lets a few generic "hub" images win for every query. 'kind' uses separate means for art
+ * and photos (and the photo mean for the visitor's photo), so the photo/art difference cancels too.
+ */
+export type CenterMode = 'off' | 'global' | 'kind';
+
+export interface Centering {
+  means: ArrayLike<number>[];
+  /** Index into `means` for each index vector. */
+  group: ArrayLike<number>;
+  /** Mean subtracted from the query. */
+  queryMean: ArrayLike<number>;
+}
+
+export function makeCentering(meta: SiteMeta, mode: CenterMode): Centering | undefined {
+  const m = meta.means;
+  if (mode === 'off' || !m) return undefined;
+  if (mode === 'global' || !m.art || !m.photo) {
+    return { means: [m.all], group: new Uint8Array(meta.count), queryMean: m.all };
+  }
+  return {
+    means: [m.art, m.photo],
+    group: Uint8Array.from(meta.items, (i) => (i.kind === 'photo' ? 1 : 0)),
+    queryMean: m.photo,
+  };
+}
+
 export interface RankOptions {
   adjust: boolean;
+  center?: Centering;
   w: number;
   topK: number;
   textPhoto: ArrayLike<number>;
@@ -107,10 +175,17 @@ export interface Match {
 
 /** score = cosine(query, art) * w + colorSimilarity * (1 - w); returns the top K, best first. */
 export function rank(photoEmbedding: ArrayLike<number>, index: Int8Index, opts: RankOptions): Match[] {
-  const query = opts.adjust
+  let query = opts.adjust
     ? adjustEmbedding(photoEmbedding, opts.textPhoto, opts.textPainting)
     : normalize(photoEmbedding);
-  const clip = index.cosineAll(query);
+  let clip: Float32Array;
+  if (opts.center) {
+    const qm = opts.center.queryMean;
+    query = normalize(query.map((x, j) => x - qm[j]));
+    clip = index.cosineCentered(query, opts.center.means, opts.center.group);
+  } else {
+    clip = index.cosineAll(query);
+  }
   const useColor = opts.w < 1 && opts.photoPalette && opts.palettes;
   const matches: Match[] = new Array(index.count);
   for (let i = 0; i < index.count; i++) {

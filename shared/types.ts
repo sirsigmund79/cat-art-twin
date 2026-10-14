@@ -38,6 +38,8 @@ export interface SiteMeta {
   /** Normalized CLIP text embeddings for PHOTO_PROMPT and PAINTING_PROMPT. */
   textPhoto: number[];
   textPainting: number[];
+  /** Mean of the normalized index vectors: overall, and per kind when both kinds are present. */
+  means?: { all: number[]; art?: number[]; photo?: number[] };
   /** Same order as the vectors in index.bin. */
   items: MetaItem[];
 }

@@ -81,3 +81,57 @@ test('color weight changes the ranking when w < 1', () => {
   assert.equal(rank(a, index, { ...opts, w: 1 })[0].index, 0);
   assert.equal(rank(a, index, { ...opts, w: 0.5 })[0].index, 1);
 });
+
+test('centered cosine matches subtracting group means directly', async () => {
+  const { makeCentering } = await import('../../shared/score.ts');
+  const dim = 32;
+  const vecs = Array.from({ length: 12 }, (_, i) => randomUnit(dim, i + 100));
+  const data = new Int8Array(12 * dim);
+  vecs.forEach((v, i) => data.set(quantizeInt8(v), i * dim));
+  const index = new Int8Index(data, dim);
+  const kinds = vecs.map((_, i) => (i % 3 === 0 ? 'photo' : 'art'));
+  // Means of the dequantized unit vectors, as 07-build computes them.
+  const unit = vecs.map((_, i) => normalize(data.subarray(i * dim, (i + 1) * dim)));
+  const meanOf = (ids: number[]) => Array.from({ length: dim }, (_, j) => ids.reduce((s, i) => s + unit[i][j], 0) / ids.length);
+  const ids = (k: string) => kinds.flatMap((x, i) => (x === k ? [i] : []));
+  const meta = {
+    count: 12,
+    means: { all: meanOf([...Array(12).keys()]), art: meanOf(ids('art')), photo: meanOf(ids('photo')) },
+    items: kinds.map((kind) => ({ kind })),
+  } as unknown as import('../../shared/types.ts').SiteMeta;
+
+  const q = randomUnit(dim, 7);
+  for (const mode of ['global', 'kind'] as const) {
+    const c = makeCentering(meta, mode)!;
+    const qc = normalize(q.map((x, j) => x - c.queryMean[j]));
+    const fast = index.cosineCentered(qc, c.means, c.group);
+    unit.forEach((u, i) => {
+      const m = c.means[c.group[i]];
+      const vc = normalize(u.map((x, j) => x - m[j]));
+      assert.ok(Math.abs(fast[i] - dot(qc, vc)) < 1e-5, `${mode} item ${i}: ${fast[i]} vs ${dot(qc, vc)}`);
+    });
+  }
+  assert.equal(makeCentering(meta, 'off'), undefined);
+  assert.equal(makeCentering({ ...meta, means: undefined }, 'kind'), undefined);
+});
+
+test('rank with centering still finds an exact match first', async () => {
+  const { makeCentering } = await import('../../shared/score.ts');
+  const dim = 32;
+  const vecs = Array.from({ length: 30 }, (_, i) => randomUnit(dim, i + 300));
+  const data = new Int8Array(30 * dim);
+  vecs.forEach((v, i) => data.set(quantizeInt8(v), i * dim));
+  const all = Array.from({ length: dim }, (_, j) => vecs.reduce((s, v) => s + v[j], 0) / vecs.length);
+  const meta = { count: 30, means: { all }, items: vecs.map(() => ({ kind: 'art' })) } as unknown as import('../../shared/types.ts').SiteMeta;
+  const zero = new Float32Array(dim);
+  const top = rank(vecs[17], new Int8Index(data, dim), {
+    adjust: false,
+    w: 1,
+    topK: 3,
+    textPhoto: zero,
+    textPainting: zero,
+    center: makeCentering(meta, 'kind'),
+  });
+  assert.equal(top[0].index, 17);
+  assert.ok(top[0].clip > 0.99);
+});

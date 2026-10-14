@@ -69,6 +69,19 @@ async function main() {
     ),
   );
 
+  // Average of the normalized vectors, overall and per kind, for centering (see makeCentering).
+  const sums = { all: new Float64Array(EMBED_DIM), art: new Float64Array(EMBED_DIM), photo: new Float64Array(EMBED_DIM) };
+  const counts = { all: 0, art: 0, photo: 0 };
+  items.forEach((item, i) => {
+    const v = vectors.subarray(i * EMBED_DIM, (i + 1) * EMBED_DIM);
+    const norm = Math.hypot(...v) || 1;
+    for (const k of ['all', item.kind] as const) {
+      for (let j = 0; j < EMBED_DIM; j++) sums[k][j] += v[j] / norm;
+      counts[k]++;
+    }
+  });
+  const mean = (k: keyof typeof sums) => (counts[k] ? Array.from(sums[k], (x) => round(x / counts[k])) : undefined);
+
   const meta: SiteMeta = {
     model: CLIP_MODEL,
     dtype: CLIP_DTYPE,
@@ -76,6 +89,7 @@ async function main() {
     count: items.length,
     textPhoto: Array.from(textPhoto, round),
     textPainting: Array.from(textPainting, round),
+    means: { all: mean('all')!, art: mean('art'), photo: mean('photo') },
     items,
   };
   fs.writeFileSync(path.join(SITE_PUBLIC, 'index.bin'), vectors);

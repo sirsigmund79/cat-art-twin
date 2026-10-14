@@ -13,8 +13,13 @@ export const PAINTING_PROMPT = 'a painting of a cat';
 
 /** Default scoring settings. Phase 6 (scripts/eval.ts) decides these. */
 export const DEFAULT_SCORING = {
-  /** Apply photo -> painting embedding arithmetic. */
-  adjust: true,
+  /**
+   * Apply photo -> painting embedding arithmetic. Off: it adds the same large shift to every query,
+   * which made the same few images win for every cat.
+   */
+  adjust: false,
+  /** Subtract average embeddings before comparing (see CenterMode in score.ts). */
+  center: 'kind' as 'off' | 'global' | 'kind',
   /** Weight of CLIP similarity versus color similarity (1 = CLIP only). */
   w: 0.85,
 };

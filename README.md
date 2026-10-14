@@ -89,7 +89,7 @@ Every step can be stopped and re-run; it picks up where it left off.
 | 4. Embed and index | `npm run embed` | `data/final/*.jpg`, `data/embeddings.json` (int8) |
 | | `npm run colors` | `data/colors.json` |
 | | `npm run build:index` | `site/public/index.bin`, `site/public/meta.json`, `site/public/crops/` |
-| 6. Tune | `npm run eval` | `eval/report.html` |
+| 6. Tune | `npm run eval` (after `npm run build:index`) | `eval/report.html` |
 
 Thresholds for Phase 2 live in `scripts/lib/thresholds.ts`. `npm run detect` rebuilds the crop list from saved
 detections on every run, so changing `DETECT_MIN` or `FALLBACK_MIN` doesn't re-run the detector.
@@ -124,19 +124,23 @@ npm run preview   # serve dist/ on http://localhost:4173
 ```
 
 On load the page starts downloading the CLIP vision model (about 90 MB at q8; the browser caches it) and the
-index. The visitor picks a photo, drags a box around the cat, and gets the top 10 matches, ranked by
+index. The visitor picks a photo (HEIC is converted in the browser when needed), drags a box around the cat, and
+gets the top 10 matches:
 
-```
-score = cosine(adjusted photo embedding, art) * w + colorSimilarity * (1 - w)
-adjusted = normalize(photo - text("a photo of a cat") + text("a painting of a cat"))
-```
+1. CLIP turns the crop into a 512-number embedding.
+2. Optionally (`adjust`) the embedding is shifted by `text("a painting of a cat") - text("a photo of a cat")`.
+3. Optionally (`center`) average embeddings are subtracted from the query and every indexed crop, so what all cat
+   images share stops dominating and color, markings and pose decide. `kind` uses separate averages for photos
+   and art (the visitor's photo uses the photo average); `global` uses one.
+4. `score = cosine * w + colorSimilarity * (1 - w)`, comparing small Lab palettes of the central region.
 
-The two text embeddings are precomputed into `meta.json`, so the browser only needs the vision model. Defaults
-(`adjust`, `w`) are in `shared/config.ts`; `npm run eval` writes a report comparing adjustment on/off and
-`w` in {1, 0.85, 0.7} over the photos in `eval/photos/`, to pick them.
+Defaults live in `shared/config.ts` (currently adjust off, center `kind`, `w` 0.85). The shift was turned off
+because it adds the same large vector to every query, which made the same few images win for every cat.
 
-The model runs on WebGPU when available and falls back to WASM. Offline embeddings use the same q8 weights as
-the WASM path.
+`npm run eval` scores the photos in `eval/photos/` (JPEG, PNG, WebP or HEIC) under 12 combinations of these
+settings and writes `eval/report.html`: a summary of how varied each setting's results are (distinct images in
+the top 3 across all photos, how many photos share the same #1, photo/art mix) and every photo's top 3 per
+setting.
 
 ### Deploy
 
