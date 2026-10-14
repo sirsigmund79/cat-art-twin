@@ -1,12 +1,18 @@
-// Phase 1a: search the museum APIs for cats and write normalized records to data/raw/<source>.jsonl.
-// Usage: npm run fetch [-- met aic cma]
+// Phase 1a: search the source APIs for cats and write normalized records to data/raw/<source>.jsonl.
+// Usage: npm run fetch [-- met aic cma commons flickr europeana]
+// With no arguments: every source that needs no key, plus flickr/europeana when their key is set.
 import fs from 'node:fs';
 import path from 'node:path';
 import pThrottle from 'p-throttle';
 import { fetchJson } from './lib/http.ts';
 import { readJson, writeJson, writeJsonl } from './lib/io.ts';
 import { CACHE, RAW } from './lib/paths.ts';
+import { fetchCommons } from './lib/sources/commons.ts';
+import { fetchEuropeana } from './lib/sources/europeana.ts';
+import { fetchFlickr } from './lib/sources/flickr.ts';
 import type { ArtworkRecord, Source } from './lib/types.ts';
+
+const CC0 = { license: 'CC0', licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/' };
 
 const TERMS = ['cat', 'cats', 'kitten', 'neko', 'chat', 'gatto', 'Katze'];
 
@@ -160,7 +166,7 @@ async function fetchMet(): Promise<ArtworkRecord[]> {
       // primaryImageSmall is the "web-large" rendition, close to the 800px we keep.
       imageUrl: obj.primaryImageSmall || obj.primaryImage,
       objectUrl: obj.objectURL || `https://www.metmuseum.org/art/collection/search/${obj.objectID}`,
-      license: 'Public domain (CC0), The Met Open Access',
+      ...CC0,
     });
   }
   if (gone) console.log(`  met: ${gone} objects no longer exist (404)`);
@@ -233,7 +239,7 @@ async function fetchAic(): Promise<ArtworkRecord[]> {
           date: clean(a.date_display),
           imageUrl: `https://www.artic.edu/iiif/2/${a.image_id}/full/843,/0/default.jpg`,
           objectUrl: `https://www.artic.edu/artworks/${a.id}`,
-          license: 'Public domain (CC0), Art Institute of Chicago',
+          ...CC0,
         });
       }
       if (page >= res.pagination.total_pages) break;
@@ -277,7 +283,7 @@ async function fetchCma(): Promise<ArtworkRecord[]> {
           date: clean(a.creation_date),
           imageUrl,
           objectUrl: a.url,
-          license: 'Public domain (CC0), Cleveland Museum of Art Open Access',
+          ...CC0,
         });
       }
       console.log(`  cma: "${term}" ${Math.min(skip + 100, res.info.total)}/${res.info.total}`);
@@ -287,10 +293,26 @@ async function fetchCma(): Promise<ArtworkRecord[]> {
   return records;
 }
 
-const FETCHERS: Record<Source, () => Promise<ArtworkRecord[]>> = { met: fetchMet, aic: fetchAic, cma: fetchCma };
+const FETCHERS: Record<Source, () => Promise<ArtworkRecord[]>> = {
+  met: fetchMet,
+  aic: fetchAic,
+  cma: fetchCma,
+  commons: fetchCommons,
+  flickr: fetchFlickr,
+  europeana: fetchEuropeana,
+};
+
+function defaultSources(): Source[] {
+  const sources: Source[] = ['met', 'aic', 'cma', 'commons'];
+  if (process.env.FLICKR_API_KEY) sources.push('flickr');
+  else console.log('Skipping flickr: set FLICKR_API_KEY to include it.');
+  if (process.env.EUROPEANA_API_KEY) sources.push('europeana');
+  else console.log('Skipping europeana: set EUROPEANA_API_KEY to include it.');
+  return sources;
+}
 
 async function main() {
-  const sources = (process.argv.slice(2).length ? process.argv.slice(2) : Object.keys(FETCHERS)) as Source[];
+  const sources = process.argv.slice(2).length ? (process.argv.slice(2) as Source[]) : defaultSources();
   const failed: Source[] = [];
   for (const source of sources) {
     if (!FETCHERS[source]) throw new Error(`unknown source ${source}`);
@@ -306,7 +328,7 @@ async function main() {
     }
     const unique = new Map(records.map((r) => [`${r.source}-${r.id}`, r]));
     writeJsonl(path.join(RAW, `${source}.jsonl`), [...unique.values()]);
-    console.log(`${source}: ${unique.size} public-domain records with images (${records.length - unique.size} duplicates removed)`);
+    console.log(`${source}: ${unique.size} openly licensed records with images (${records.length - unique.size} duplicates removed)`);
   }
   if (failed.length) {
     console.error(`\nFailed: ${failed.join(', ')}. Retry with: npm run fetch -- ${failed.join(' ')}`);

@@ -10,10 +10,12 @@ import type { CropRecord, ScoreRecord } from './lib/types.ts';
 
 async function main() {
   const scores = readJson<Record<string, ScoreRecord>>(SCORES, {});
-  const candidates = Object.entries(scores)
-    .filter(([, s]) => s.catScore >= CLASSIFY_MIN)
-    .map(([key]) => key);
   const detections = readJson<Record<string, Detection[]>>(DETECTIONS, {});
+  // Images detected on an earlier run stay candidates even if a rescore dropped them below
+  // CLASSIFY_MIN, so their crop IDs (and any review decisions on them) don't disappear.
+  const candidates = Object.entries(scores)
+    .filter(([key, s]) => s.catScore >= CLASSIFY_MIN || detections[key])
+    .map(([key]) => key);
   const todo = candidates.filter((k) => !detections[k]);
   console.log(`${candidates.length} candidates (catScore >= ${CLASSIFY_MIN}), ${todo.length} still to detect`);
 

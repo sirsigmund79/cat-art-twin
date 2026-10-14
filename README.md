@@ -1,11 +1,11 @@
 # Cat Art Twin
 
-Upload a photo of your cat and find the cat in centuries of public-domain museum art that looks most like it,
+Upload a photo of your cat and find the cat in centuries of art and photography that looks most like it,
 with a side-by-side image to share. Matching runs entirely in the visitor's browser: the photo never leaves
 the device, and the whole thing is a static site.
 
-The heavy lifting happens once, offline: scrape museum open-access APIs, filter and crop the cats, review them
-by hand, embed them with CLIP and ship a small index. The site runs the same CLIP model in the browser with
+The heavy lifting happens once, offline: collect openly licensed images from museum and image APIs, filter and
+crop the cats, review the uncertain ones by hand, embed them with CLIP and ship a small index. The site runs the same CLIP model in the browser with
 [Transformers.js](https://github.com/huggingface/transformers.js).
 
 Built on open source:
@@ -56,6 +56,24 @@ curl -sI "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/confi
 Behind an HTTPS proxy, set `NODE_USE_ENV_PROXY=1` so Node's `fetch` uses `HTTPS_PROXY`. If huggingface.co itself is
 unreachable, set `HF_ENDPOINT` to a Hugging Face mirror.
 
+## Sources and licenses
+
+| Source | What | Key |
+| --- | --- | --- |
+| The Met, Art Institute of Chicago, Cleveland Museum of Art | Public-domain museum art | None |
+| [Wikimedia Commons](https://commons.wikimedia.org) | Files tagged as depicting a house cat, and the "Cats in art" category tree: art and photos | None |
+| [Flickr](https://www.flickr.com) | Creative Commons and public-domain cat photos | `FLICKR_API_KEY`, free at <https://www.flickr.com/services/apps/create/> |
+| [Europeana](https://www.europeana.eu) | Images from thousands of European museums and archives, including recent CC-licensed work | `EUROPEANA_API_KEY`, free at <https://pro.europeana.eu/page/get-api> |
+
+`npm run fetch` uses every source whose key is set. Set keys for one session in Command Prompt with
+`set FLICKR_API_KEY=...` (PowerShell: `$env:FLICKR_API_KEY="..."`, macOS/Linux: `export FLICKR_API_KEY=...`).
+Caps keep the first run manageable: `COMMONS_MAX` (default 8000), `FLICKR_MAX` (5000), `EUROPEANA_MAX` (3000).
+
+Accepted licenses: public domain, CC0, CC BY, CC BY-SA, CC BY-NC and CC BY-NC-SA (`scripts/lib/licenses.ts`).
+NoDerivatives licenses are refused, since the site shows crops. Every match on the site credits its creator,
+license (linked) and source. NonCommercial images mean the site itself must stay non-commercial: no ads, no paid
+features.
+
 ## Pipeline
 
 Every step can be stopped and re-run; it picks up where it left off.
@@ -80,6 +98,10 @@ detections on every run, so changing `DETECT_MIN` or `FALLBACK_MIN` doesn't re-r
 
 `npm run review`, then open <http://localhost:5174>. Crops are sorted by `catScore`, least confident first.
 
+Crops where both models are confident (`catScore` >= 0.9 and detector score >= 0.3, set in
+`scripts/lib/thresholds.ts`) are kept without review and listed in the **Auto-kept** tab. Skim it and press `X` on
+any mistakes. Explicit decisions always win over auto-keep.
+
 | Key | Action |
 | --- | --- |
 | Arrow keys | Move |
@@ -91,7 +113,7 @@ detections on every run, so changing `DETECT_MIN` or `FALLBACK_MIN` doesn't re-r
 
 "Reject rest of page" rejects every undecided crop on the page. The Rescue tab lists images that produced no
 crop, most cat-like first; keeping one adds the whole image (press `R` to box the cat). Hover or focus a tile to
-see the full artwork. Every decision is saved immediately. Anything left undecided counts as rejected.
+see the full artwork. Every decision is saved immediately. Anything left undecided in the Review and Rescue tabs counts as rejected.
 
 ## Site
 
@@ -139,5 +161,5 @@ Playwright's download, set `CHROMIUM_PATH`.
 
 ## Data and licenses
 
-Artworks come from the open-access programs of The Metropolitan Museum of Art, the Art Institute of Chicago and
-the Cleveland Museum of Art, filtered to public-domain (CC0) works. Every match links to the museum's object page.
+See [Sources and licenses](#sources-and-licenses). Site thumbnails are 320px WebP crops; every match links to the
+work's page at its source.

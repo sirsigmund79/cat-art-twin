@@ -1,8 +1,8 @@
 import { padBox } from './models.ts';
 import { readJson } from './io.ts';
 import { CROP_RECORDS, REVIEW } from './paths.ts';
-import { CROP_PAD } from './thresholds.ts';
-import type { Box, CropRecord, ReviewFile } from './types.ts';
+import { AUTO_KEEP_CAT, AUTO_KEEP_DET, CROP_PAD } from './thresholds.ts';
+import type { Box, CropRecord, ReviewEntry, ReviewFile } from './types.ts';
 
 export interface KeptCrop {
   cropId: string;
@@ -12,11 +12,21 @@ export interface KeptCrop {
   starred: boolean;
 }
 
-/** Crops the reviewer kept or starred. Anything undecided counts as rejected. */
+/** Confident enough to keep without review, unless the reviewer decided otherwise. */
+export function isAutoKeep(crop: CropRecord, entry?: ReviewEntry): boolean {
+  return !entry?.decision && !crop.fallback && crop.catScore >= AUTO_KEEP_CAT && (crop.detScore ?? 0) >= AUTO_KEEP_DET;
+}
+
+/** Crops the reviewer kept or starred, plus auto-kept ones. Anything else undecided counts as rejected. */
 export function loadKept(): KeptCrop[] {
   const records = new Map(readJson<CropRecord[]>(CROP_RECORDS, []).map((c) => [c.cropId, c]));
   const review = readJson<ReviewFile>(REVIEW, {});
   const kept: KeptCrop[] = [];
+  for (const crop of records.values()) {
+    if (isAutoKeep(crop, review[crop.cropId])) {
+      kept.push({ cropId: crop.cropId, artworkId: crop.artworkId, box: crop.box && padBox(crop.box, CROP_PAD), starred: false });
+    }
+  }
   for (const [cropId, entry] of Object.entries(review)) {
     if (entry.decision !== 'keep' && entry.decision !== 'star') continue;
     const rec = records.get(cropId);

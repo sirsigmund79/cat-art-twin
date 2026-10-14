@@ -10,6 +10,8 @@ import { DATA, IMAGES, imagePath } from './lib/paths.ts';
 
 const CONCURRENCY = 6;
 const LONG_EDGE = 800;
+/** Some aggregator links point at huge master files; skip anything bigger than this. */
+const MAX_BYTES = 40 * 1024 * 1024;
 
 async function main() {
   fs.mkdirSync(IMAGES, { recursive: true });
@@ -29,6 +31,10 @@ async function main() {
         try {
           const res = await fetchWithRetry(rec.imageUrl, {}, 4);
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const type = res.headers.get('content-type') ?? '';
+          // Some hosts label images application/octet-stream, so only reject clear non-images (web pages).
+          if (/^(text\/|application\/(json|xml|xhtml))/.test(type)) throw new Error(`not an image (${type})`);
+          if (Number(res.headers.get('content-length')) > MAX_BYTES) throw new Error('file too large');
           const buf = Buffer.from(await res.arrayBuffer());
           const out = await sharp(buf)
             .rotate()

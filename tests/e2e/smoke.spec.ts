@@ -31,7 +31,7 @@ test('a cat photo gets an art twin with a credit link and a share image', async 
   await expect(page.locator('#twin-title')).not.toBeEmpty();
   const link = page.locator('#twin-link');
   await expect(link).toHaveAttribute('href', /^https:\/\//);
-  await expect(page.locator('#twin-license')).toContainText(/public domain/i);
+  await expect(page.locator('#twin-license')).toHaveText(/^(Public domain|CC0|CC BY(-NC)?(-SA)? \d\.\d)$/);
   const twin = page.locator('#twin-img');
   await expect.poll(() => twin.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBeGreaterThan(0);
 

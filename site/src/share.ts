@@ -33,7 +33,7 @@ function fitText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number):
   return `${t}…`;
 }
 
-/** Side-by-side share card: the visitor's cat and its art twin, with caption and museum credit. */
+/** Side-by-side share card: the visitor's cat and its twin, with caption, source and license credit. */
 export async function renderShareCard(cat: HTMLCanvasElement, art: MetaItem): Promise<HTMLCanvasElement> {
   const canvas = document.createElement('canvas');
   canvas.width = W;
@@ -52,12 +52,12 @@ export async function renderShareCard(cat: HTMLCanvasElement, art: MetaItem): Pr
   ctx.fillStyle = '#2b2118';
   ctx.textBaseline = 'top';
   ctx.font = '600 30px Georgia, serif';
-  ctx.fillText(fitText(ctx, `My cat's art twin: ${art.title}`, W - PAD * 2), PAD, y);
+  ctx.fillText(fitText(ctx, `My cat's twin: ${art.title}`, W - PAD * 2), PAD, y);
   ctx.font = '22px Georgia, serif';
   ctx.fillStyle = '#5a4a3a';
   const byline = [art.artist, art.date].filter(Boolean).join(', ');
   ctx.fillText(fitText(ctx, byline, W - PAD * 2), PAD, y + 44);
-  ctx.fillText(fitText(ctx, `${art.museum} · public domain`, W - PAD * 2), PAD, y + 76);
+  ctx.fillText(fitText(ctx, `${art.museum} · ${art.license}`, W - PAD * 2), PAD, y + 76);
   ctx.font = '18px system-ui, sans-serif';
   ctx.textAlign = 'right';
   ctx.fillText(location.host || 'cat-art-twin', W - PAD, H - 34);

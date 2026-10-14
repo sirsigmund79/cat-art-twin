@@ -145,7 +145,7 @@ $('find').addEventListener('click', async () => {
   if (!cropper) return;
   const button = $<HTMLButtonElement>('find');
   button.disabled = true;
-  button.textContent = 'Searching the museums…';
+  button.textContent = 'Searching for your twin…';
   try {
     catCanvas = cropper.getCroppedCanvas({ maxWidth: 1024, maxHeight: 1024, imageSmoothingQuality: 'high' });
     const [data, embedding] = await Promise.all([dataPromise, clip.embed(await canvasToBlob(catCanvas, 'image/jpeg'))]);
@@ -178,10 +178,13 @@ function renderMatch() {
   const item = items[matches[current].index];
   $<HTMLImageElement>('twin-img').src = item.crop;
   $<HTMLImageElement>('twin-img').alt = item.title;
-  $('twin-rank').textContent = current === 0 ? 'Art twin' : `Match #${current + 1}`;
+  $('twin-rank').textContent = current === 0 ? (item.kind === 'photo' ? 'Photo twin' : 'Art twin') : `Match #${current + 1}`;
   $('twin-title').textContent = item.title;
   $('twin-byline').textContent = [item.artist, item.date].filter(Boolean).join(', ');
-  $('twin-license').textContent = item.license;
+  const license = $<HTMLAnchorElement>('twin-license');
+  license.textContent = item.license;
+  if (item.licenseUrl) license.href = item.licenseUrl;
+  else license.removeAttribute('href');
   $('twin-museum').textContent = item.museum;
   $<HTMLAnchorElement>('twin-link').href = item.objectUrl;
   $<HTMLButtonElement>('prev-match').disabled = current === 0;
@@ -221,7 +224,7 @@ $('download').addEventListener('click', async () => {
 $('share').addEventListener('click', async () => {
   const { blob, item } = await shareBlob();
   const file = new File([blob], 'cat-art-twin.png', { type: 'image/png' });
-  const text = `My cat's art twin: ${item.title}${item.artist ? ` by ${item.artist}` : ''} (${item.museum})`;
+  const text = `My cat's twin: ${item.title}${item.artist ? ` by ${item.artist}` : ''} (${item.museum}, ${item.license})`;
   if (navigator.canShare?.({ files: [file] })) {
     try {
       await navigator.share({ files: [file], text, url: location.href });

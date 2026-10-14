@@ -2,7 +2,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-export const DATA = path.join(ROOT, 'data');
+/** CAT_ART_DATA overrides the data folder (tests use a temporary one). */
+export const DATA = process.env.CAT_ART_DATA ?? path.join(ROOT, 'data');
 export const RAW = path.join(DATA, 'raw');
 export const CACHE = path.join(DATA, 'cache');
 export const IMAGES = path.join(DATA, 'images');

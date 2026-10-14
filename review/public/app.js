@@ -3,7 +3,7 @@ const PAGE_SIZE = 60;
 
 const state = {
   tab: 'crops',
-  items: { crops: [], rescue: [] },
+  items: { crops: [], auto: [], rescue: [] },
   review: {},
   undecidedOnly: false,
   page: 0,
@@ -19,7 +19,7 @@ const grid = $('grid');
 async function load() {
   const res = await fetch('/api/items');
   const data = await res.json();
-  state.items = { crops: data.crops, rescue: data.rescue };
+  state.items = { crops: data.crops, auto: data.auto, rescue: data.rescue };
   state.review = data.review;
   render();
 }
@@ -56,7 +56,7 @@ function render() {
       const v = state.thumbVersion[item.cropId] ?? 0;
       tile.innerHTML = `
         <img loading="lazy" src="/thumb/${encodeURIComponent(item.cropId)}?v=${v}" alt="">
-        ${entry.decision ? `<span class="badge ${entry.decision}">${entry.decision}</span>` : ''}
+        ${entry.decision ? `<span class="badge ${entry.decision}">${entry.decision}</span>` : state.tab === 'auto' ? '<span class="badge keep">auto</span>' : ''}
         ${entry.box ? '<span class="badge boxed">box</span>' : ''}
         <div class="cap"></div>`;
       tile.querySelector('.cap').textContent =
@@ -71,6 +71,7 @@ function render() {
 
   $('page').textContent = `Page ${state.page + 1} / ${pageCount()}`;
   $('count-crops').textContent = `(${state.items.crops.length})`;
+  $('count-auto').textContent = `(${state.items.auto.length})`;
   $('count-rescue').textContent = `(${state.items.rescue.length})`;
   for (const b of document.querySelectorAll('.tab')) b.setAttribute('aria-pressed', String(b.dataset.tab === state.tab));
 
@@ -82,8 +83,10 @@ function render() {
   }
   const decided = counts.keep + counts.star + counts.reject;
   $('progress').textContent =
-    `${decided} / ${all.length} decided · ${counts.keep} kept · ${counts.star} starred · ${counts.reject} rejected · ` +
-    `${all.length - decided} undecided`;
+    state.tab === 'auto'
+      ? `${all.length - counts.reject} kept · ${counts.reject} rejected by you · ${all.length - decided} not checked (they stay kept)`
+      : `${decided} / ${all.length} decided · ${counts.keep} kept · ${counts.star} starred · ${counts.reject} rejected · ` +
+        `${all.length - decided} undecided`;
   showPreview(items[state.focus]);
   grid.children[state.focus]?.scrollIntoView({ block: 'nearest' });
 }
@@ -131,14 +134,16 @@ let saving = Promise.resolve();
 function update(ids, body) {
   if (!ids.length) return;
   const rescue = state.tab === 'rescue';
+  const auto = state.tab === 'auto';
   for (const id of ids) {
     const entry = (state.review[id] ??= {});
     if (body.decision === null) delete entry.decision;
     else if (body.decision) entry.decision = body.decision;
     if (body.box) entry.box = body.box;
     if (rescue) entry.rescue = true;
+    if (auto) entry.auto = true;
   }
-  const payload = JSON.stringify({ ids, ...body, rescue });
+  const payload = JSON.stringify({ ids, ...body, rescue, auto });
   saving = saving
     .then(() => fetch('/api/review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload }))
     .then((res) => {

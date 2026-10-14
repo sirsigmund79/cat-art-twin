@@ -1,9 +1,10 @@
-// Phase 2a: zero-shot CLIP score for "is this an artwork of a cat?" -> data/scores.json.
+// Phase 2a: zero-shot CLIP score for "is this a cat (artwork or photo)?" -> data/scores.json.
+// Also records whether CLIP sees the image as a photo or as art.
 import fs from 'node:fs';
 import { loadClipText, loadClipVision, toRawImage } from './lib/models.ts';
 import { forEachWithCheckpoint, readJson, writeJson } from './lib/io.ts';
 import { IMAGES, SCORES, imagePath } from './lib/paths.ts';
-import { CAT_PROMPT, CLASSIFY_MIN, DECOY_PROMPTS } from './lib/thresholds.ts';
+import { CAT_PROMPTS, CLASSIFY_MIN, DECOY_PROMPTS, PROMPTS_VERSION } from './lib/thresholds.ts';
 import type { ScoreRecord } from './lib/types.ts';
 
 const BATCH = 16;
@@ -16,10 +17,11 @@ async function main() {
     .filter((f) => f.endsWith('.jpg'))
     .map((f) => f.slice(0, -4));
   const scores = readJson<Record<string, ScoreRecord>>(SCORES, {});
-  const todo = keys.filter((k) => !scores[k]);
+  // Scores from an older prompt set are recomputed (fast: CLIP only, no detection).
+  const todo = keys.filter((k) => scores[k]?.v !== PROMPTS_VERSION);
   console.log(`${keys.length} images, ${keys.length - todo.length} already scored, ${todo.length} to go`);
 
-  const prompts = [CAT_PROMPT, ...DECOY_PROMPTS];
+  const prompts = [CAT_PROMPTS.art, CAT_PROMPTS.photo, ...DECOY_PROMPTS];
   const textEmbeds = await (await loadClipText())(prompts);
   const embed = await loadClipVision();
 
@@ -35,7 +37,9 @@ async function main() {
         const logits = textEmbeds.map((t) => LOGIT_SCALE * dot(vecs[i], t));
         const probs = softmax(logits);
         scores[key] = {
-          catScore: round(probs[0]),
+          catScore: round(probs[0] + probs[1]),
+          kind: probs[1] > probs[0] ? 'photo' : 'art',
+          v: PROMPTS_VERSION,
           probs: Object.fromEntries(prompts.map((p, j) => [p, round(probs[j])])),
         };
       });
@@ -44,9 +48,10 @@ async function main() {
     5,
   );
 
+  const photos = Object.values(scores).filter((s) => s.kind === 'photo' && s.catScore >= CLASSIFY_MIN).length;
   const all = Object.values(scores).map((s) => s.catScore);
   const above = all.filter((s) => s >= CLASSIFY_MIN).length;
-  console.log(`Scored ${all.length} images; ${above} have catScore >= ${CLASSIFY_MIN} and go on to detection.`);
+  console.log(`Scored ${all.length} images; ${above} have catScore >= ${CLASSIFY_MIN} and go on to detection (${photos} photos, ${above - photos} art).`);
   for (const t of [0.05, 0.15, 0.3, 0.5, 0.7, 0.9]) {
     console.log(`  catScore >= ${t}: ${all.filter((s) => s >= t).length}`);
   }

@@ -1,17 +1,24 @@
-import type { Source } from '../../shared/types.ts';
+import type { Kind, Source } from '../../shared/types.ts';
 
-export type { Source };
+export type { Kind, Source };
 
-/** One normalized artwork from a museum API (data/raw/<source>.jsonl). */
+/** One normalized image record from a source API (data/raw/<source>.jsonl). */
 export interface ArtworkRecord {
   id: string;
   source: Source;
   title: string;
+  /** Artist, photographer or uploader to credit. */
   artist: string;
   date: string;
   imageUrl: string;
+  /** Page for this work at its source (museum object page, Commons file page, Flickr photo page). */
   objectUrl: string;
+  /** Short license label from licenses.ts, e.g. "CC BY-SA 4.0". */
   license: string;
+  /** Link to the license; may be missing on older records. */
+  licenseUrl?: string;
+  /** Holding institution when the source is an aggregator (Europeana). */
+  provider?: string;
 }
 
 /** A box in normalized image coordinates (0..1). */
@@ -23,7 +30,12 @@ export interface Box {
 }
 
 export interface ScoreRecord {
+  /** Combined probability of the cat prompts (artwork or photo of a cat). */
   catScore: number;
+  /** Which cat prompt won. Missing on scores from before photos were added. */
+  kind?: Kind;
+  /** Prompt-set version; scores from another version are recomputed. */
+  v?: number;
   /** Softmax probability for every prompt, for debugging thresholds. */
   probs: Record<string, number>;
 }
@@ -48,6 +60,8 @@ export interface ReviewEntry {
   box?: Box;
   /** Set for items added from the rescue tab (images filtered out in Phase 2). */
   rescue?: boolean;
+  /** Set for decisions made in the Auto-kept tab, so the crop stays listed there. */
+  auto?: boolean;
 }
 
 export type ReviewFile = Record<string, ReviewEntry>;

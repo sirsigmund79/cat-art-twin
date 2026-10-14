@@ -1,4 +1,7 @@
-export type Source = 'met' | 'aic' | 'cma';
+export type Source = 'met' | 'aic' | 'cma' | 'commons' | 'flickr' | 'europeana';
+
+/** Whether CLIP sees the image as a photograph or as art (painting, print, drawing...). */
+export type Kind = 'photo' | 'art';
 
 export interface PaletteColor {
   /** CIELAB coordinates. */
@@ -15,9 +18,14 @@ export interface MetaItem {
   title: string;
   artist: string;
   date: string;
+  /** Where it comes from, e.g. "Art Institute of Chicago" or "Rijksmuseum via Europeana". */
   museum: string;
   objectUrl: string;
+  /** Short license label, e.g. "Public domain" or "CC BY-NC 2.0". */
   license: string;
+  /** Link to the license text; empty for public domain works without one. */
+  licenseUrl: string;
+  kind: Kind;
   colors: PaletteColor[];
   starred: boolean;
 }
@@ -34,8 +42,11 @@ export interface SiteMeta {
   items: MetaItem[];
 }
 
-export const MUSEUM_NAMES: Record<Source, string> = {
+export const SOURCE_NAMES: Record<Source, string> = {
   met: 'The Metropolitan Museum of Art',
   aic: 'Art Institute of Chicago',
   cma: 'Cleveland Museum of Art',
+  commons: 'Wikimedia Commons',
+  flickr: 'Flickr',
+  europeana: 'Europeana',
 };

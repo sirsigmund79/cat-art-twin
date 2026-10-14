@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { cutCrop, padBox } from '../scripts/lib/models.ts';
+import { isAutoKeep } from '../scripts/lib/kept.ts';
 import { loadArtworks, readJson, writeJson } from '../scripts/lib/io.ts';
 import { CROPS, CROP_RECORDS, REVIEW, ROOT, SCORES, imagePath } from '../scripts/lib/paths.ts';
 import { CROP_PAD, CROP_SIZE } from '../scripts/lib/thresholds.ts';
@@ -33,7 +34,7 @@ interface Item {
   date: string;
 }
 
-function buildItems(): { crops: Item[]; rescue: Item[] } {
+function buildItems(): { crops: Item[]; auto: Item[]; rescue: Item[] } {
   const meta = (key: string) => {
     const a = artworks.get(key);
     return { title: a?.title ?? key, artist: a?.artist ?? '', date: a?.date ?? '' };
@@ -65,7 +66,14 @@ function buildItems(): { crops: Item[]; rescue: Item[] } {
       rescue: true,
       ...meta(key),
     }));
-  return { crops: cropItems, rescue: rescueItems };
+  // Auto-kept crops get their own tab for spot checks. A crop stays in its tab after you decide
+  // on it (otherwise rejecting an auto-kept crop would make it jump tabs mid-review).
+  const autoIds = new Set(crops.filter((c) => isAutoKeep(c, review[c.cropId]) || review[c.cropId]?.auto).map((c) => c.cropId));
+  return {
+    crops: cropItems.filter((i) => !autoIds.has(i.cropId)),
+    auto: cropItems.filter((i) => autoIds.has(i.cropId)).sort((a, b) => a.catScore - b.catScore),
+    rescue: rescueItems,
+  };
 }
 
 const TYPES: Record<string, string> = {
@@ -97,6 +105,7 @@ interface UpdateRequest {
   decision?: Decision | null;
   box?: Box;
   rescue?: boolean;
+  auto?: boolean;
 }
 
 const server = http.createServer(async (req, res) => {
@@ -113,6 +122,7 @@ const server = http.createServer(async (req, res) => {
         else if (body.decision) entry.decision = body.decision;
         if (body.box) entry.box = body.box;
         if (body.rescue) entry.rescue = true;
+        if (body.auto) entry.auto = true;
         if (!entry.decision && !entry.box) delete review[id];
       }
       save();
@@ -149,7 +159,9 @@ process.on('SIGINT', () => {
 });
 
 server.listen(PORT, () => {
-  const { crops: c, rescue: r } = buildItems();
+  const { crops: c, auto: a, rescue: r } = buildItems();
   const decided = c.filter((i) => review[i.cropId]?.decision).length;
-  console.log(`Review tool: http://localhost:${PORT}  (${c.length} crops, ${decided} decided; ${r.length} in rescue)`);
+  console.log(
+    `Review tool: http://localhost:${PORT}  (${c.length} to review, ${decided} decided; ${a.length} auto-kept; ${r.length} in rescue)`,
+  );
 });

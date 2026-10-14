@@ -4,13 +4,13 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Cat Art Twin</title>
-    <meta name="description" content="Find the cat in centuries of public-domain museum art that looks most like yours." />
+    <meta name="description" content="Find the cat in centuries of art and photography that looks most like yours." />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐈</text></svg>" />
   </head>
   <body>
     <header class="masthead">
       <h1>Cat Art Twin</h1>
-      <p>Which cat in centuries of museum art looks most like yours?</p>
+      <p>Which cat in centuries of art and photography looks most like yours?</p>
     </header>
 
     <main>
@@ -47,7 +47,10 @@
         <div class="credit">
           <h2 id="twin-title"></h2>
           <p id="twin-byline"></p>
-          <p class="small"><span id="twin-license"></span> · <a id="twin-link" target="_blank" rel="noopener">View at <span id="twin-museum"></span></a></p>
+          <p class="small">
+            <a id="twin-license" target="_blank" rel="noopener license"></a> ·
+            <a id="twin-link" target="_blank" rel="noopener">View at <span id="twin-museum"></span></a>
+          </p>
         </div>
         <div class="actions">
           <button id="prev-match" class="button">‹ Previous</button>
@@ -71,8 +74,9 @@
     <footer>
       <p><strong>Your photo never leaves your device.</strong> Matching runs entirely in your browser.</p>
       <p class="small">
-        Artworks are public domain, from The Metropolitan Museum of Art, the Art Institute of Chicago and the
-        Cleveland Museum of Art open-access collections. Matching uses
+        Images are public domain or Creative Commons licensed, credited on each match, from the open-access
+        collections of The Metropolitan Museum of Art, the Art Institute of Chicago and the Cleveland Museum of Art,
+        and from Wikimedia Commons, Flickr and Europeana. Crops and resizing are ours. Matching uses
         <a href="https://huggingface.co/openai/clip-vit-base-patch32" target="_blank" rel="noopener">CLIP</a> via
         <a href="https://github.com/huggingface/transformers.js" target="_blank" rel="noopener">Transformers.js</a>.
       </p>
