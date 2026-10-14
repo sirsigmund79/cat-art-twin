@@ -190,17 +190,37 @@ async function fetchAic(): Promise<ArtworkRecord[]> {
   const throttle = pThrottle({ limit: 1, interval: 1000 }); // AIC: 60 req/min anonymous
   const get = throttle(<T>(url: string) => fetchJson<T>(url));
   for (const term of TERMS) {
-    // Search by text only and filter to public domain here: adding a `query[...]` filter to the URL
-    // replaces the text search, which returned the whole public-domain collection for every term.
+    // `q` (and a `query[...]` URL filter) came back ignored: every term returned the whole collection.
+    // So the text match and the public-domain filter both go in an Elasticsearch query, sent as one
+    // URL-encoded JSON `params` value, the form the AIC docs recommend for production use.
     // AIC search results stop at 1,000 (10 pages of 100).
     let total = 0;
     let kept = 0;
     for (let page = 1; page <= 10; page++) {
-      const url =
-        `https://api.artic.edu/api/v1/artworks/search?q=${encodeURIComponent(term)}` +
-        `&fields=id,title,artist_display,date_display,image_id,is_public_domain&limit=100&page=${page}`;
+      const params = {
+        query: {
+          bool: {
+            must: [
+              {
+                multi_match: {
+                  query: term,
+                  fields: ['title^3', 'subject_titles^2', 'term_titles^2', 'classification_titles', 'alt_titles', 'description'],
+                },
+              },
+            ],
+            filter: [{ term: { is_public_domain: true } }],
+          },
+        },
+        fields: ['id', 'title', 'artist_display', 'date_display', 'image_id', 'is_public_domain'],
+        limit: 100,
+        page,
+      };
+      const url = `https://api.artic.edu/api/v1/artworks/search?params=${encodeURIComponent(JSON.stringify(params))}`;
       const res = await get<AicResponse>(url);
       total = res.pagination.total;
+      if (total > 50_000) {
+        throw new Error(`"${term}" matched ${total} artworks, so the search term was ignored; not saving these results`);
+      }
       for (const a of res.data) {
         if (!a.image_id || !a.is_public_domain) continue;
         kept++;
